@@ -64,7 +64,7 @@ pub(crate) fn get_session_cookie(headers: &axum::http::HeaderMap) -> Option<Stri
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
-/// Middleware applied to all `/admin/*` routes.
+/// Middleware applied to all routes except `/login` and `/logout`.
 /// When an `admin_password` is configured the request must carry a valid
 /// `troop_session` cookie; otherwise the visitor is redirected to `/login`.
 async fn auth_middleware(
@@ -86,8 +86,17 @@ async fn auth_middleware(
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn build_router(state: AppState) -> Router {
-    // Admin routes are protected by the auth middleware.
-    let admin_routes = Router::new()
+    // All application routes are protected by the auth middleware.
+    // Only /login and /logout remain public.
+    let protected_routes = Router::new()
+        // Root
+        .route("/", get(handlers::root))
+        // Task routes
+        .route("/tasks", get(handlers::task_list).post(handlers::add_task))
+        .route("/tasks/:id", get(handlers::task_detail))
+        .route("/tasks/:id/done", post(handlers::mark_done))
+        .route("/tasks/:id/delete", post(handlers::delete_task))
+        // Admin dashboard
         .route("/admin", get(handlers::admin_dashboard))
         // Integration management – email
         .route(
@@ -130,18 +139,11 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     Router::new()
-        // Root
-        .route("/", get(handlers::root))
-        // Task routes
-        .route("/tasks", get(handlers::task_list).post(handlers::add_task))
-        .route("/tasks/:id", get(handlers::task_detail))
-        .route("/tasks/:id/done", post(handlers::mark_done))
-        .route("/tasks/:id/delete", post(handlers::delete_task))
-        // Auth routes (public)
+        // Auth routes (always public)
         .route("/login", get(handlers::login_page).post(handlers::do_login))
         .route("/logout", post(handlers::do_logout))
-        // Protected admin routes
-        .merge(admin_routes)
+        // All other routes require authentication
+        .merge(protected_routes)
         // Catch-all
         .fallback(handlers::fallback)
         .with_state(state)

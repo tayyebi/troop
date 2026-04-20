@@ -143,6 +143,11 @@ async fn poll_source(
 ) {
     let name = source.name().to_string();
     loop {
+        // Arm the notification listener *before* blocking on the poll so that
+        // any notify_one() sent while the poll is running is not missed when
+        // the select! below drops the other branch.
+        let notified = trigger.notified();
+
         let src = source.clone();
         let result = tokio::task::spawn_blocking(move || src.poll()).await;
 
@@ -199,7 +204,7 @@ async fn poll_source(
         // Wait for either the regular interval or a manual trigger.
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {}
-            _ = trigger.notified() => {
+            _ = notified => {
                 info!("[{}] manual poll triggered", name);
             }
         }

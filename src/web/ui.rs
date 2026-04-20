@@ -207,19 +207,15 @@ code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; backg
 .error-label { font-weight: 600; }
 .task-card-link {
   position: relative;
-  cursor: pointer;
-}
-.task-card-link::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius);
-  z-index: 0;
 }
 .task-card-link:hover { border-color: #aaa; }
-.task-card-link > * { position: relative; z-index: 1; }
-.task-card-link a { z-index: 2; position: relative; }
-.task-card-link form { z-index: 2; position: relative; }
+.task-card-link .card-overlay-link {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: var(--radius);
+}
+.task-card-link > *:not(.card-overlay-link) { position: relative; z-index: 1; }
 .md-content { margin-top: 12px; }
 .md-content h1,.md-content h2,.md-content h3 { font-size: 0.95rem; font-weight: 700; margin: 12px 0 6px; }
 .md-content h1 { font-size: 1rem; }
@@ -489,12 +485,14 @@ fn task_card(t: &Task) -> String {
         )
     };
 
-    // The card is made fully clickable via the .task-card-link CSS overlay.
-    // The <a> covering the card title acts as the primary link target; buttons
-    // are elevated above the overlay (z-index:2) so they remain independently
-    // clickable.
+    // The card is made fully clickable via an absolutely-positioned <a> overlay
+    // (.card-overlay-link) that sits behind all other content (z-index 0).
+    // The visible title <a> and action buttons are raised above it (z-index 1)
+    // so they remain independently clickable and fully keyboard/screen-reader
+    // accessible without any JavaScript.
     format!(
-        r#"<div class="card task-card-link" onclick="window.location='/tasks/{id}'">
+        r#"<div class="card task-card-link">
+  <a href="/tasks/{id}" class="card-overlay-link" tabindex="-1" aria-hidden="true"></a>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
     <div>
       <div class="card-title"><a href="/tasks/{id}">{title}</a></div>
@@ -896,6 +894,20 @@ pub fn not_found() -> String {
         "<div class=\"empty\"><p>Page not found.</p><p style=\"margin-top:8px\"><a href=\"/tasks\">← Back to tasks</a></p></div>",
         false,
     )
+}
+
+/// Render a Markdown string to an HTML string.
+/// The output is safe to embed directly – pulldown-cmark escapes HTML entities
+/// in the source text automatically.
+fn markdown_to_html(md: &str) -> String {
+    let opts = Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TABLES
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES;
+    let parser = Parser::new_ext(md, opts);
+    let mut output = String::new();
+    html::push_html(&mut output, parser);
+    output
 }
 
 /// Escape characters with special meaning in HTML.
