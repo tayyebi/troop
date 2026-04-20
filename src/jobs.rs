@@ -471,7 +471,15 @@ async fn run_done_reply_worker(storage: Arc<Storage>, accounts: Vec<AccountConfi
                 }
             };
 
-            let subject = format!("Task completed: {}", task.title);
+            let subject = format!(
+                "Task completed: {}",
+                // Sanitize: strip control characters (including \r and \n) that could
+                // allow email header injection if the title contained them.
+                task.title
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .collect::<String>()
+            );
             let body = format!(
                 "Your task has been completed.\n\nTask ID: {}\nTitle:   {}\nCreated: {}",
                 task.id,

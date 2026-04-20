@@ -112,13 +112,13 @@ fn parse_task_file(path: &Path, done: bool) -> Result<Task> {
     let description = body_lines.join("\n");
 
     if id.is_empty() {
-        // Fall back: derive id from filename stem, stripping a leading dot if present
-        id = path
+        // Fall back: derive id from filename stem, stripping at most one leading dot
+        // (dot-prefixed files are replied tasks, e.g. ".abc123.md" → "abc123").
+        let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .trim_start_matches('.')
-            .to_string();
+            .unwrap_or("unknown");
+        id = stem.strip_prefix('.').unwrap_or(stem).to_string();
     }
     if title.is_empty() {
         title = id.clone();
