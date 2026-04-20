@@ -24,3 +24,4 @@ uuid = { version = "1", features = ["v4"] }
 mailparse = "0.14"
 tower-http = { version = "0.5", features = ["trace"] }
 urlencoding = "2"
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }

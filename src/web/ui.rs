@@ -1,5 +1,7 @@
 use crate::config::AccountConfig;
 use crate::storage::Task;
+use crate::web::SourceStatus;
+use pulldown_cmark::{html, Options, Parser};
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -196,6 +198,36 @@ code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; backg
 .nav-card:hover { border-color: #aaa; text-decoration: none; }
 .nav-card-title { font-weight: 600; font-size: 0.92rem; margin-bottom: 2px; }
 .nav-card-sub { font-size: 0.78rem; color: var(--muted); }
+.last-error {
+  font-size: 0.76rem;
+  color: var(--danger);
+  margin-top: 6px;
+  word-break: break-all;
+}
+.error-label { font-weight: 600; }
+.task-card-link {
+  position: relative;
+}
+.task-card-link:hover { border-color: #aaa; }
+.task-card-link .card-overlay-link {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: var(--radius);
+}
+.task-card-link > *:not(.card-overlay-link) { position: relative; z-index: 1; }
+.md-content { margin-top: 12px; }
+.md-content h1,.md-content h2,.md-content h3 { font-size: 0.95rem; font-weight: 700; margin: 12px 0 6px; }
+.md-content h1 { font-size: 1rem; }
+.md-content p { font-size: 0.88rem; line-height: 1.6; margin-bottom: 8px; }
+.md-content ul,.md-content ol { padding-left: 20px; font-size: 0.88rem; line-height: 1.6; margin-bottom: 8px; }
+.md-content li { margin-bottom: 2px; }
+.md-content pre { margin-bottom: 8px; }
+.md-content code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.md-content pre code { background: none; padding: 0; font-size: 0.8rem; }
+.md-content blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--muted); margin: 0 0 8px; }
+.md-content a { color: var(--accent); text-decoration: underline; }
+.md-content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 "#;
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
@@ -453,8 +485,14 @@ fn task_card(t: &Task) -> String {
         )
     };
 
+    // The card is made fully clickable via an absolutely-positioned <a> overlay
+    // (.card-overlay-link) that sits behind all other content (z-index 0).
+    // The visible title <a> and action buttons are raised above it (z-index 1)
+    // so they remain independently clickable and fully keyboard/screen-reader
+    // accessible without any JavaScript.
     format!(
-        r#"<div class="card">
+        r#"<div class="card task-card-link">
+  <a href="/tasks/{id}" class="card-overlay-link" tabindex="-1" aria-hidden="true"></a>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
     <div>
       <div class="card-title"><a href="/tasks/{id}">{title}</a></div>
@@ -483,7 +521,7 @@ pub fn task_detail(t: &Task, flash: Option<&str>) -> String {
     let desc_html = if t.description.is_empty() {
         "<p style=\"color:var(--muted);font-style:italic\">No description.</p>".to_string()
     } else {
-        format!("<pre>{}</pre>", html_escape(&t.description))
+        format!("<div class=\"md-content\">{}</div>", markdown_to_html(&t.description))
     };
 
     let done_btn = if t.done {
@@ -576,7 +614,7 @@ pub fn admin_dashboard(
 
 pub fn admin_email_integrations(
     accounts: &[&AccountConfig],
-    source_status: &[(String, bool)],
+    source_status: &[SourceStatus],
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
@@ -643,7 +681,7 @@ pub fn admin_email_integrations(
 
 pub fn admin_telegram_integrations(
     accounts: &[&AccountConfig],
-    source_status: &[(String, bool)],
+    source_status: &[SourceStatus],
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
@@ -692,12 +730,12 @@ pub fn admin_telegram_integrations(
 }
 
 /// Shared card used on both integration detail pages.
-fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &str) -> String {
-    let connected = source_status
+fn integration_card(a: &AccountConfig, source_status: &[SourceStatus], base: &str) -> String {
+    let status_entry = source_status
         .iter()
-        .find(|(n, _)| n.ends_with(&a.name))
-        .map(|(_, ok)| *ok)
-        .unwrap_or(false);
+        .find(|s| s.name.ends_with(&a.name));
+    let connected = status_entry.map(|s| s.connected).unwrap_or(false);
+    let last_error = status_entry.and_then(|s| s.last_error.as_deref());
     let dot = if connected { "dot-ok" } else { "dot-off" };
     let status_text = if connected { "connected" } else { "offline" };
     let enabled_badge = if a.enabled {
@@ -705,11 +743,22 @@ fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &
     } else {
         "<span class=\"badge badge-off\">disabled</span>"
     };
+    let error_html = match last_error {
+        Some(err) => format!(
+            r#"<div class="last-error"><span class="error-label">Last error:</span> {}</div>"#,
+            html_escape(err)
+        ),
+        None => String::new(),
+    };
     format!(
         r#"<div class="card">
   <div class="card-title"><span class="status-dot {dot}"></span>{name}</div>
   <div class="card-meta">{atype} &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled} &nbsp;·&nbsp; poll every {poll}s</div>
+  {error_html}
   <div class="actions">
+    <form class="inline" method="post" action="{base}/{name}/poll">
+      <button type="submit" class="secondary">Poll now</button>
+    </form>
     <form class="inline" method="post" action="{base}/{name}/delete">
       <button type="submit" class="danger">Remove</button>
     </form>
@@ -722,6 +771,7 @@ fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &
         enabled = enabled_badge,
         poll = a.poll_interval_secs,
         base = base,
+        error_html = error_html,
     )
 }
 
@@ -844,6 +894,20 @@ pub fn not_found() -> String {
         "<div class=\"empty\"><p>Page not found.</p><p style=\"margin-top:8px\"><a href=\"/tasks\">← Back to tasks</a></p></div>",
         false,
     )
+}
+
+/// Render a Markdown string to an HTML string.
+/// The output is safe to embed directly – pulldown-cmark escapes HTML entities
+/// in the source text automatically.
+fn markdown_to_html(md: &str) -> String {
+    let opts = Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TABLES
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES;
+    let parser = Parser::new_ext(md, opts);
+    let mut output = String::new();
+    html::push_html(&mut output, parser);
+    output
 }
 
 /// Escape characters with special meaning in HTML.

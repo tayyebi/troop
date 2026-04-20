@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::config::{AccountConfig, AccountType, FilterConfig, HeaderCheck};
 use crate::storage::{Storage, Task};
-use super::{ui, AppState};
+use super::{ui, AppState, SourceStatus};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -154,7 +154,7 @@ pub async fn email_integrations_page(
 ) -> Response {
     let cfg = state.config.read().unwrap();
     let has_password = cfg.server.admin_password.is_some();
-    let status = state.source_status.read().unwrap().clone();
+    let status: Vec<SourceStatus> = state.source_status.read().unwrap().clone();
     let accounts: Vec<_> = cfg.accounts.iter()
         .filter(|a| matches!(a.account_type, AccountType::Imap | AccountType::Pop3))
         .collect();
@@ -227,7 +227,7 @@ pub async fn telegram_integrations_page(
 ) -> Response {
     let cfg = state.config.read().unwrap();
     let has_password = cfg.server.admin_password.is_some();
-    let status = state.source_status.read().unwrap().clone();
+    let status: Vec<SourceStatus> = state.source_status.read().unwrap().clone();
     let accounts: Vec<_> = cfg.accounts.iter()
         .filter(|a| matches!(a.account_type, AccountType::Telegram))
         .collect();
@@ -277,6 +277,36 @@ pub async fn delete_telegram_integration(
         return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
     }
     flash_redirect("/admin/integrations/telegram", &format!("'{}' removed.", name))
+}
+
+// ── Admin – Manual poll trigger ───────────────────────────────────────────────
+
+/// Trigger an immediate poll for a connector by name.
+/// Works for both email and Telegram sources.
+pub async fn poll_now(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    // Determine where to redirect based on account type.
+    let redirect_path = {
+        let cfg = state.config.read().unwrap();
+        cfg.accounts
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| match a.account_type {
+                AccountType::Telegram => "/admin/integrations/telegram",
+                _ => "/admin/integrations/email",
+            })
+            .unwrap_or("/admin/integrations/email")
+            .to_string()
+    };
+
+    if let Some(notify) = state.poll_triggers.get(&name) {
+        notify.notify_one();
+        flash_redirect(&redirect_path, &format!("Poll triggered for '{}'.", name))
+    } else {
+        flash_redirect(&redirect_path, &format!("ERR:Source '{}' not found.", name))
+    }
 }
 
 // ── Admin – Filters ───────────────────────────────────────────────────────────
