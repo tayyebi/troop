@@ -533,13 +533,13 @@ pub fn admin_dashboard(
     let email_rows = if email_accounts.is_empty() {
         "<p class=\"empty\">No email accounts configured.</p>".to_string()
     } else {
-        email_accounts.iter().map(|a| account_card(a)).collect::<Vec<_>>().join("\n")
+        email_accounts.iter().map(|a| account_card(*a)).collect::<Vec<_>>().join("\n")
     };
 
     let telegram_rows = if telegram_accounts.is_empty() {
         "<p class=\"empty\">No Telegram bots configured.</p>".to_string()
     } else {
-        telegram_accounts.iter().map(|a| account_card(a)).collect::<Vec<_>>().join("\n")
+        telegram_accounts.iter().map(|a| account_card(*a)).collect::<Vec<_>>().join("\n")
     };
 
     // Add account form
