@@ -10,25 +10,15 @@ use axum::{
     Router,
 };
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::{Arc, RwLock},
 };
-use tokio::sync::Notify;
 
 use crate::config::Config;
+use crate::jobs::JobManager;
 use crate::storage::Storage;
 
 // ── Shared application state ──────────────────────────────────────────────────
-
-/// Runtime status for a single message source.
-#[derive(Clone, Default)]
-pub struct SourceStatus {
-    pub name: String,
-    pub connected: bool,
-    /// The most recent error message produced by this source, if any.
-    pub last_error: Option<String>,
-}
 
 /// State shared across all HTTP handlers.
 #[derive(Clone)]
@@ -39,11 +29,8 @@ pub struct AppState {
     pub config_path: PathBuf,
     /// Task storage (backed by the filesystem).
     pub storage: Arc<Storage>,
-    /// Per-source runtime status (name, connected, last_error).
-    pub source_status: Arc<RwLock<Vec<SourceStatus>>>,
-    /// Per-source notifiers that, when triggered, cause the poller to run
-    /// immediately instead of waiting for the next scheduled interval.
-    pub poll_triggers: Arc<HashMap<String, Arc<Notify>>>,
+    /// Background job manager: owns poller tasks and their status.
+    pub job_manager: Arc<JobManager>,
     /// Current valid session token (UUID v4).  Regenerated on password change.
     pub session_token: Arc<RwLock<String>>,
 }
@@ -137,6 +124,7 @@ pub fn build_router(state: AppState) -> Router {
             get(handlers::filter_list).post(handlers::add_filter),
         )
         .route("/admin/filters/:idx/delete", post(handlers::delete_filter))
+        .route("/admin/jobs", get(handlers::jobs_page))
         .route(
             "/admin/password",
             get(handlers::change_password_page).post(handlers::do_change_password),
