@@ -160,25 +160,47 @@ Click a task title to open the detail view. It shows the full description, the s
 
 ### Admin
 
-The **Admin** page (`/admin`) is the control panel. It shows task counts and manages accounts, filters, and the admin password.
+The **Admin** page (`/admin`) is the control panel. It shows task counts and links to integrations, jobs, filters, and password management.
 
 #### Email integrations
 
 Click **Email** on the admin dashboard to open the dedicated email management page. It lists all IMAP and POP3 accounts and shows each account's connection status (green dot = connected, grey = offline).
 
 - **Add** an account by filling the *Add email account* form.  
-  Required fields: *Name*, *Protocol* (IMAP or POP3), *Host*, *Port*, *Username*, *Password*.
-- **Remove** an account with the **Remove** button on its card.  
-  Changes take effect after restarting troop.
+  Required fields: *Name*, *Protocol* (IMAP or POP3), *Host*, *Port*, *Username*, *Password*.  
+  The poller starts immediately — no restart needed.
+- **Edit** an account with the **Edit** button. Changes take effect immediately.
+- **Remove** an account with the **Remove** button. The poller stops immediately.
+- **Poll now** triggers an immediate poll without waiting for the next interval.
 
 #### Telegram integrations
 
 Click **Telegram** on the admin dashboard to open the dedicated Telegram management page.
 
 - **Add** a bot by filling the *Add Telegram bot* form.  
-  Required fields: *Name*, *Bot token* (from [@BotFather](https://t.me/BotFather)).
-- **Remove** a bot with the **Remove** button on its card.  
-  Changes take effect after restarting troop.
+  Required fields: *Name*, *Bot token* (from [@BotFather](https://t.me/BotFather)).  
+  The poller starts immediately — no restart needed.
+- **Edit** a bot with the **Edit** button. Changes take effect immediately.
+- **Remove** a bot with the **Remove** button. The poller stops immediately.
+- **Poll now** triggers an immediate poll.
+
+#### Jobs
+
+Click **Jobs** on the admin dashboard (or navigate to `/admin/jobs`) to see all background polling tasks managed by the built-in job manager.
+
+Each job card shows:
+
+| Field | Description |
+|-------|-------------|
+| Phase badge | `running` (poll in progress), `idle` (waiting), `error` (last poll failed), `starting` (just spawned), `stopped` |
+| Connection dot | Green = last poll succeeded; grey = offline or not yet run |
+| Poll interval | How often this job polls its source |
+| Run count | Total number of completed poll attempts |
+| Last run | Wall-clock time of the most recent attempt |
+| Last error | Error message from the most recent failure, if any |
+| Dump | Expandable pre-formatted block with all job fields |
+
+Jobs are created, restarted, and removed automatically whenever you add, edit, or delete an integration or a filter through the admin UI.
 
 ---
 
@@ -189,6 +211,8 @@ The **Filters** page (`/admin/filters`) lets you restrict which incoming message
 An empty filter list accepts **every** message from every account.  
 When filters are present, a message is accepted if it matches **any** filter (OR across filters).  
 Within a single filter, **all** fields must match (AND).
+
+Adding or removing a filter restarts all pollers immediately so the new rules apply to the next poll.
 
 **Available conditions**
 
@@ -225,6 +249,22 @@ Click **Change password** on the admin dashboard or navigate to `/admin/password
 After a successful change the old session is invalidated and a new session is started automatically.
 
 > **Tip:** To remove password protection entirely, delete `admin_password` from `troop.toml` and restart troop.
+
+---
+
+## Background job manager
+
+troop runs one background polling task per enabled account, all managed by a central `JobManager`.  
+The manager owns the tokio task handles and per-source notifiers, and exposes the following lifecycle operations:
+
+| Operation | When it happens |
+|-----------|-----------------|
+| **start** | On startup, for every enabled account |
+| **restart** | Automatically after adding, editing, or removing an account or filter |
+| **stop** | When an account is removed or disabled |
+| **trigger** | When **Poll now** is clicked in the UI |
+
+Because pollers are controlled at runtime there is **no need to restart the troop process** after changing integrations or filters.
 
 ---
 

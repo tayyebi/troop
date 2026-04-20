@@ -1,6 +1,6 @@
 use crate::config::AccountConfig;
+use crate::jobs::{JobInfo, JobPhase};
 use crate::storage::Task;
-use crate::web::SourceStatus;
 use pulldown_cmark::{html, Options, Parser};
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
@@ -572,6 +572,7 @@ pub fn admin_dashboard(
     done_count: usize,
     email_count: usize,
     telegram_count: usize,
+    job_count: usize,
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
@@ -597,6 +598,10 @@ pub fn admin_dashboard(
   <div class="nav-card-title">Telegram <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{tg_count}</span></div>
   <div class="nav-card-sub">Telegram bots</div>
 </a>
+<a href="/admin/jobs" class="nav-card">
+  <div class="nav-card-title">Jobs <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{job_count}</span></div>
+  <div class="nav-card-sub">Background polling tasks</div>
+</a>
 <div class="divider"></div>
 <div style="display:flex;gap:7px;flex-wrap:wrap">
   <a href="/admin/filters" class="btn secondary">Filters</a>
@@ -605,6 +610,7 @@ pub fn admin_dashboard(
         stats = stats,
         email_count = email_count,
         tg_count = telegram_count,
+        job_count = job_count,
     );
 
     page("Admin", "/admin", flash, &body, has_password)
@@ -614,14 +620,14 @@ pub fn admin_dashboard(
 
 pub fn admin_email_integrations(
     accounts: &[&AccountConfig],
-    source_status: &[SourceStatus],
+    jobs: &[JobInfo],
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
     let account_cards = if accounts.is_empty() {
         "<p class=\"empty\">No email accounts configured.</p>".to_string()
     } else {
-        accounts.iter().map(|a| integration_card(a, source_status, "/admin/integrations/email")).collect::<Vec<_>>().join("\n")
+        accounts.iter().map(|a| integration_card(a, jobs, "/admin/integrations/email")).collect::<Vec<_>>().join("\n")
     };
 
     let add_form = r#"<div class="card" style="margin-top:8px">
@@ -693,14 +699,14 @@ pub fn admin_email_integrations(
 
 pub fn admin_telegram_integrations(
     accounts: &[&AccountConfig],
-    source_status: &[SourceStatus],
+    jobs: &[JobInfo],
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
     let account_cards = if accounts.is_empty() {
         "<p class=\"empty\">No Telegram bots configured.</p>".to_string()
     } else {
-        accounts.iter().map(|a| integration_card(a, source_status, "/admin/integrations/telegram")).collect::<Vec<_>>().join("\n")
+        accounts.iter().map(|a| integration_card(a, jobs, "/admin/integrations/telegram")).collect::<Vec<_>>().join("\n")
     };
 
     let add_form = r#"<div class="card" style="margin-top:8px">
@@ -748,12 +754,10 @@ pub fn admin_telegram_integrations(
 }
 
 /// Shared card used on both integration detail pages.
-fn integration_card(a: &AccountConfig, source_status: &[SourceStatus], base: &str) -> String {
-    let status_entry = source_status
-        .iter()
-        .find(|s| s.name.ends_with(&a.name));
-    let connected = status_entry.map(|s| s.connected).unwrap_or(false);
-    let last_error = status_entry.and_then(|s| s.last_error.as_deref());
+fn integration_card(a: &AccountConfig, jobs: &[JobInfo], base: &str) -> String {
+    let job = jobs.iter().find(|j| j.name.ends_with(&a.name));
+    let connected = job.map(|j| j.connected).unwrap_or(false);
+    let last_error = job.and_then(|j| j.last_error.as_deref());
     let dot = if connected { "dot-ok" } else { "dot-off" };
     let status_text = if connected { "connected" } else { "offline" };
     let enabled_badge = if a.enabled {
@@ -1039,7 +1043,78 @@ pub fn admin_filters(
     page("Filters", "/admin", flash, &body, has_password)
 }
 
-// ── Utility ───────────────────────────────────────────────────────────────────
+// ── Jobs page ─────────────────────────────────────────────────────────────────
+
+pub fn admin_jobs(jobs: &[JobInfo], has_password: bool, flash: Option<&str>) -> String {
+    let phase_badge = |phase: &JobPhase| match phase {
+        JobPhase::Running  => r#"<span class="badge" style="background:#dbeafe;color:#1e40af">running</span>"#,
+        JobPhase::Idle     => r#"<span class="badge badge-done">idle</span>"#,
+        JobPhase::Error    => r#"<span class="badge" style="background:#fef2f2;color:#991b1b">error</span>"#,
+        JobPhase::Starting => r#"<span class="badge badge-off">starting</span>"#,
+        JobPhase::Stopped  => r#"<span class="badge badge-off">stopped</span>"#,
+    };
+
+    let job_cards = if jobs.is_empty() {
+        "<p class=\"empty\">No background jobs running.</p>".to_string()
+    } else {
+        jobs.iter()
+            .map(|j| {
+                let dot = if j.connected { "dot-ok" } else { "dot-off" };
+                let connected_text = if j.connected { "connected" } else { "offline" };
+                let last_run = j
+                    .last_run
+                    .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    .unwrap_or_else(|| "never".to_string());
+                let error_html = match j.last_error.as_deref() {
+                    Some(err) => format!(
+                        r#"<div class="last-error"><span class="error-label">Last error:</span> {}</div>"#,
+                        html_escape(err)
+                    ),
+                    None => String::new(),
+                };
+                format!(
+                    r#"<div class="card">
+  <div class="card-title">
+    <span class="status-dot {dot}"></span>{name} {phase_badge}
+  </div>
+  <div class="card-meta">
+    {connected} &nbsp;·&nbsp; poll every {interval}s &nbsp;·&nbsp; runs: {runs} &nbsp;·&nbsp; last run: {last_run}
+  </div>
+  {error_html}
+  <details style="margin-top:10px">
+    <summary style="font-size:0.78rem;cursor:pointer;color:var(--muted)">Dump</summary>
+    <pre style="margin-top:8px">{dump}</pre>
+  </details>
+</div>"#,
+                    dot = dot,
+                    name = html_escape(&j.name),
+                    phase_badge = phase_badge(&j.phase),
+                    connected = connected_text,
+                    interval = j.poll_interval_secs,
+                    runs = j.run_count,
+                    last_run = html_escape(&last_run),
+                    error_html = error_html,
+                    dump = html_escape(&j.dump()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin">← Admin</a></div>
+<div class="section-header" style="margin-top:0">
+  <h2>Background jobs ({count})</h2>
+</div>
+{job_cards}"#,
+        count = jobs.len(),
+        job_cards = job_cards,
+    );
+
+    page("Jobs", "/admin", flash, &body, has_password)
+}
+
+
 
 pub fn not_found() -> String {
     page(

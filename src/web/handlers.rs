@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::config::{AccountConfig, AccountType, FilterConfig, HeaderCheck};
 use crate::storage::{Storage, Task};
-use super::{ui, AppState, SourceStatus};
+use super::{ui, AppState};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -117,7 +117,6 @@ pub async fn admin_dashboard(
 ) -> Response {
     let cfg = state.config.read().unwrap();
     let (todo, done) = state.storage.counts();
-    let _status = state.source_status.read().unwrap().clone();
     let has_password = cfg.server.admin_password.is_some();
     let email_count = cfg.accounts.iter()
         .filter(|a| matches!(a.account_type, AccountType::Imap | AccountType::Pop3))
@@ -125,11 +124,13 @@ pub async fn admin_dashboard(
     let telegram_count = cfg.accounts.iter()
         .filter(|a| matches!(a.account_type, AccountType::Telegram))
         .count();
+    let job_count = state.job_manager.all_jobs().len();
     ok_html(ui::admin_dashboard(
         todo,
         done,
         email_count,
         telegram_count,
+        job_count,
         has_password,
         q.flash.as_deref(),
     ))
@@ -171,11 +172,11 @@ pub async fn email_integrations_page(
 ) -> Response {
     let cfg = state.config.read().unwrap();
     let has_password = cfg.server.admin_password.is_some();
-    let status: Vec<SourceStatus> = state.source_status.read().unwrap().clone();
+    let jobs = state.job_manager.all_jobs();
     let accounts: Vec<_> = cfg.accounts.iter()
         .filter(|a| matches!(a.account_type, AccountType::Imap | AccountType::Pop3))
         .collect();
-    ok_html(ui::admin_email_integrations(&accounts, &status, has_password, q.flash.as_deref()))
+    ok_html(ui::admin_email_integrations(&accounts, &jobs, has_password, q.flash.as_deref()))
 }
 
 pub async fn add_email_integration(
@@ -212,22 +213,28 @@ pub async fn add_email_integration(
             return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
         }
     }
-    flash_redirect("/admin/integrations/email", "Email account added. Restart troop to activate polling.")
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
+    flash_redirect("/admin/integrations/email", "Email account added. Poller started.")
 }
 
 pub async fn delete_email_integration(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
-    let mut cfg = state.config.write().unwrap();
-    let before = cfg.accounts.len();
-    cfg.accounts.retain(|a| a.name != name);
-    if cfg.accounts.len() == before {
-        return flash_redirect("/admin/integrations/email", &format!("ERR:Account '{}' not found.", name));
+    {
+        let mut cfg = state.config.write().unwrap();
+        let before = cfg.accounts.len();
+        cfg.accounts.retain(|a| a.name != name);
+        if cfg.accounts.len() == before {
+            return flash_redirect("/admin/integrations/email", &format!("ERR:Account '{}' not found.", name));
+        }
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
+        }
     }
-    if let Err(e) = cfg.save(&state.config_path) {
-        return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
-    }
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
     flash_redirect("/admin/integrations/email", &format!("'{}' removed.", name))
 }
 
@@ -261,28 +268,32 @@ pub async fn update_email_integration(
     let tls = form.tls.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
     let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
 
-    let mut cfg = state.config.write().unwrap();
-    match cfg.accounts.iter_mut().find(|a| a.name == name) {
-        None => {
-            return flash_redirect("/admin/integrations/email", &format!("ERR:Account '{}' not found.", name));
-        }
-        Some(account) => {
-            account.account_type = account_type;
-            account.host = nonempty(form.host);
-            account.port = port;
-            account.username = nonempty(form.username);
-            if let Some(pw) = nonempty(form.password) {
-                account.password = Some(pw);
+    {
+        let mut cfg = state.config.write().unwrap();
+        match cfg.accounts.iter_mut().find(|a| a.name == name) {
+            None => {
+                return flash_redirect("/admin/integrations/email", &format!("ERR:Account '{}' not found.", name));
             }
-            account.tls = tls;
-            account.enabled = enabled;
-            account.poll_interval_secs = poll;
+            Some(account) => {
+                account.account_type = account_type;
+                account.host = nonempty(form.host);
+                account.port = port;
+                account.username = nonempty(form.username);
+                if let Some(pw) = nonempty(form.password) {
+                    account.password = Some(pw);
+                }
+                account.tls = tls;
+                account.enabled = enabled;
+                account.poll_interval_secs = poll;
+            }
+        }
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
         }
     }
-    if let Err(e) = cfg.save(&state.config_path) {
-        return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
-    }
-    flash_redirect("/admin/integrations/email", &format!("'{}' updated. Restart troop to apply changes.", name))
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
+    flash_redirect("/admin/integrations/email", &format!("'{}' updated. Poller restarted.", name))
 }
 
 // ── Admin – Telegram integrations ─────────────────────────────────────────────
@@ -308,11 +319,11 @@ pub async fn telegram_integrations_page(
 ) -> Response {
     let cfg = state.config.read().unwrap();
     let has_password = cfg.server.admin_password.is_some();
-    let status: Vec<SourceStatus> = state.source_status.read().unwrap().clone();
+    let jobs = state.job_manager.all_jobs();
     let accounts: Vec<_> = cfg.accounts.iter()
         .filter(|a| matches!(a.account_type, AccountType::Telegram))
         .collect();
-    ok_html(ui::admin_telegram_integrations(&accounts, &status, has_password, q.flash.as_deref()))
+    ok_html(ui::admin_telegram_integrations(&accounts, &jobs, has_password, q.flash.as_deref()))
 }
 
 pub async fn add_telegram_integration(
@@ -342,22 +353,28 @@ pub async fn add_telegram_integration(
             return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
         }
     }
-    flash_redirect("/admin/integrations/telegram", "Telegram bot added. Restart troop to activate polling.")
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
+    flash_redirect("/admin/integrations/telegram", "Telegram bot added. Poller started.")
 }
 
 pub async fn delete_telegram_integration(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
-    let mut cfg = state.config.write().unwrap();
-    let before = cfg.accounts.len();
-    cfg.accounts.retain(|a| a.name != name);
-    if cfg.accounts.len() == before {
-        return flash_redirect("/admin/integrations/telegram", &format!("ERR:Bot '{}' not found.", name));
+    {
+        let mut cfg = state.config.write().unwrap();
+        let before = cfg.accounts.len();
+        cfg.accounts.retain(|a| a.name != name);
+        if cfg.accounts.len() == before {
+            return flash_redirect("/admin/integrations/telegram", &format!("ERR:Bot '{}' not found.", name));
+        }
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
+        }
     }
-    if let Err(e) = cfg.save(&state.config_path) {
-        return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
-    }
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
     flash_redirect("/admin/integrations/telegram", &format!("'{}' removed.", name))
 }
 
@@ -384,23 +401,27 @@ pub async fn update_telegram_integration(
         .unwrap_or(30);
     let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
 
-    let mut cfg = state.config.write().unwrap();
-    match cfg.accounts.iter_mut().find(|a| a.name == name) {
-        None => {
-            return flash_redirect("/admin/integrations/telegram", &format!("ERR:Bot '{}' not found.", name));
-        }
-        Some(account) => {
-            if let Some(tok) = nonempty(form.token) {
-                account.token = Some(tok);
+    {
+        let mut cfg = state.config.write().unwrap();
+        match cfg.accounts.iter_mut().find(|a| a.name == name) {
+            None => {
+                return flash_redirect("/admin/integrations/telegram", &format!("ERR:Bot '{}' not found.", name));
             }
-            account.enabled = enabled;
-            account.poll_interval_secs = poll;
+            Some(account) => {
+                if let Some(tok) = nonempty(form.token) {
+                    account.token = Some(tok);
+                }
+                account.enabled = enabled;
+                account.poll_interval_secs = poll;
+            }
+        }
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
         }
     }
-    if let Err(e) = cfg.save(&state.config_path) {
-        return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
-    }
-    flash_redirect("/admin/integrations/telegram", &format!("'{}' updated. Restart troop to apply changes.", name))
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
+    flash_redirect("/admin/integrations/telegram", &format!("'{}' updated. Poller restarted.", name))
 }
 
 // ── Admin – Manual poll trigger ───────────────────────────────────────────────
@@ -425,25 +446,7 @@ pub async fn poll_now(
             .to_string()
     };
 
-    // Source names are stored with a protocol prefix (e.g. "imap:main-email"),
-    // but the URL path carries only the account name ("main-email").
-    // Try an exact match first, then fall back to a suffix match so both
-    // forms are accepted (mirrors the ends_with lookup used for source_status
-    // in ui.rs).
-    let suffix = format!(":{}", name);
-    let notify = state
-        .poll_triggers
-        .get(&name)
-        .or_else(|| {
-            state
-                .poll_triggers
-                .iter()
-                .find(|(k, _)| k.ends_with(&suffix))
-                .map(|(_, v)| v)
-        });
-
-    if let Some(notify) = notify {
-        notify.notify_one();
+    if state.job_manager.trigger_poll(&name) {
         flash_redirect(&redirect_path, &format!("Poll triggered for '{}'.", name))
     } else {
         flash_redirect(&redirect_path, &format!("ERR:Source '{}' not found.", name))
@@ -503,6 +506,8 @@ pub async fn add_filter(
             return flash_redirect("/admin/filters", &format!("ERR:save failed: {}", e));
         }
     }
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
     flash_redirect("/admin/filters", "Filter added.")
 }
 
@@ -520,6 +525,8 @@ pub async fn delete_filter(
             return flash_redirect("/admin/filters", &format!("ERR:save failed: {}", e));
         }
     }
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
     flash_redirect("/admin/filters", "Filter removed.")
 }
 
@@ -645,6 +652,17 @@ pub async fn do_change_password(
         .unwrap(),
     );
     resp
+}
+
+// ── Admin – Jobs ──────────────────────────────────────────────────────────────
+
+pub async fn jobs_page(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    let has_password = state.config.read().unwrap().server.admin_password.is_some();
+    let jobs = state.job_manager.all_jobs();
+    ok_html(ui::admin_jobs(&jobs, has_password, q.flash.as_deref()))
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
