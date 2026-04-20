@@ -795,8 +795,6 @@ fn integration_card(a: &AccountConfig, source_status: &[SourceStatus], base: &st
     )
 }
 
-// ── Filters page ──────────────────────────────────────────────────────────────
-
 // ── Edit email integration page ───────────────────────────────────────────────
 
 pub fn admin_edit_email_integration(
