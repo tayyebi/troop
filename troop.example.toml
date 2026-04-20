@@ -1,0 +1,71 @@
+# troop example configuration
+# Copy to troop.toml and edit as needed
+
+[server]
+# Address and port to bind the web interface
+bind = "0.0.0.0:8080"
+# Optional admin password (leave empty to disable authentication)
+admin_password = "changeme"
+
+[storage]
+# Directories for pending and completed tasks (relative to working directory)
+todo_dir = "todo"
+done_dir = "done"
+
+# ── Accounts ─────────────────────────────────────────────────────────────────
+# Each account is an input source that troop polls for incoming commands.
+
+# IMAP account example
+[[accounts]]
+name = "main-email"
+type = "imap"
+host = "imap.example.com"
+port = 993
+username = "troop@example.com"
+password = "secret"
+tls = true
+enabled = true
+poll_interval_secs = 60
+
+# POP3 account example (not yet implemented, shown for completeness)
+# [[accounts]]
+# name = "secondary-email"
+# type = "pop3"
+# host = "pop.example.com"
+# port = 995
+# username = "troop2@example.com"
+# password = "secret"
+# tls = true
+# enabled = false
+# poll_interval_secs = 120
+
+# Telegram bot example (stub – integration ready for future use)
+# [[accounts]]
+# name = "tg-bot"
+# type = "telegram"
+# token = "123456:ABC-DEF..."
+# enabled = false
+# poll_interval_secs = 5
+
+# ── Filters ──────────────────────────────────────────────────────────────────
+# Filters guard which messages are allowed to submit commands.
+# All fields are optional; if a filter has no fields it accepts everything.
+# Multiple filters are OR-ed: a message passes if it satisfies ANY filter.
+# Within a single filter all present fields must ALL match (AND logic).
+
+# Accept any message from a trusted sender on the main-email account
+[[filters]]
+account = "main-email"
+from_address = ["boss@example.com", "admin@example.com"]
+
+# Accept messages that mention the magic word anywhere in the body
+# [[filters]]
+# body_contains = ["TROOP_SECRET"]
+
+# Require a specific header (e.g. set by your mail server)
+# [[filters]]
+# header_checks = [{ name = "X-Troop-Auth", value = "mysecret" }]
+
+# Require GPG-signed messages (gpg binary must be in PATH)
+# [[filters]]
+# gpg_required = true

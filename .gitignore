@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target/
+
+# Task storage directories (managed at runtime)
+/todo/
+/done/
+
+# Runtime config (copy from troop.example.toml)
+/troop.toml
+
+# Editor and OS artifacts
+.DS_Store
+*.swp
+*.swo
