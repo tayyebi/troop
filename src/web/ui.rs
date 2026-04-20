@@ -1,6 +1,7 @@
 use crate::config::AccountConfig;
 use crate::storage::Task;
 use crate::web::SourceStatus;
+use pulldown_cmark::{html, Options, Parser};
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -204,6 +205,33 @@ code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; backg
   word-break: break-all;
 }
 .error-label { font-weight: 600; }
+.task-card-link {
+  position: relative;
+  cursor: pointer;
+}
+.task-card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+  z-index: 0;
+}
+.task-card-link:hover { border-color: #aaa; }
+.task-card-link > * { position: relative; z-index: 1; }
+.task-card-link a { z-index: 2; position: relative; }
+.task-card-link form { z-index: 2; position: relative; }
+.md-content { margin-top: 12px; }
+.md-content h1,.md-content h2,.md-content h3 { font-size: 0.95rem; font-weight: 700; margin: 12px 0 6px; }
+.md-content h1 { font-size: 1rem; }
+.md-content p { font-size: 0.88rem; line-height: 1.6; margin-bottom: 8px; }
+.md-content ul,.md-content ol { padding-left: 20px; font-size: 0.88rem; line-height: 1.6; margin-bottom: 8px; }
+.md-content li { margin-bottom: 2px; }
+.md-content pre { margin-bottom: 8px; }
+.md-content code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.md-content pre code { background: none; padding: 0; font-size: 0.8rem; }
+.md-content blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--muted); margin: 0 0 8px; }
+.md-content a { color: var(--accent); text-decoration: underline; }
+.md-content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 "#;
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
@@ -461,8 +489,12 @@ fn task_card(t: &Task) -> String {
         )
     };
 
+    // The card is made fully clickable via the .task-card-link CSS overlay.
+    // The <a> covering the card title acts as the primary link target; buttons
+    // are elevated above the overlay (z-index:2) so they remain independently
+    // clickable.
     format!(
-        r#"<div class="card">
+        r#"<div class="card task-card-link" onclick="window.location='/tasks/{id}'">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
     <div>
       <div class="card-title"><a href="/tasks/{id}">{title}</a></div>
@@ -491,7 +523,7 @@ pub fn task_detail(t: &Task, flash: Option<&str>) -> String {
     let desc_html = if t.description.is_empty() {
         "<p style=\"color:var(--muted);font-style:italic\">No description.</p>".to_string()
     } else {
-        format!("<pre>{}</pre>", html_escape(&t.description))
+        format!("<div class=\"md-content\">{}</div>", markdown_to_html(&t.description))
     };
 
     let done_btn = if t.done {
