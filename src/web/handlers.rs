@@ -425,7 +425,24 @@ pub async fn poll_now(
             .to_string()
     };
 
-    if let Some(notify) = state.poll_triggers.get(&name) {
+    // Source names are stored with a protocol prefix (e.g. "imap:main-email"),
+    // but the URL path carries only the account name ("main-email").
+    // Try an exact match first, then fall back to a suffix match so both
+    // forms are accepted (mirrors the ends_with lookup used for source_status
+    // in ui.rs).
+    let suffix = format!(":{}", name);
+    let notify = state
+        .poll_triggers
+        .get(&name)
+        .or_else(|| {
+            state
+                .poll_triggers
+                .iter()
+                .find(|(k, _)| k.ends_with(&suffix))
+                .map(|(_, v)| v)
+        });
+
+    if let Some(notify) = notify {
         notify.notify_one();
         flash_redirect(&redirect_path, &format!("Poll triggered for '{}'.", name))
     } else {
