@@ -8,16 +8,18 @@ mod web;
 
 use anyhow::Result;
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{Arc, RwLock},
     time::Duration,
 };
+use tokio::sync::Notify;
 use tracing::{error, info, warn};
 
 use config::{AccountType, Config};
 use source::{imap::ImapSource, pop3::Pop3Source, telegram::TelegramSource, MessageSource};
 use storage::Storage;
-use web::AppState;
+use web::{AppState, SourceStatus};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,9 +62,24 @@ async fn main() -> Result<()> {
         })
         .collect();
 
-    let source_status: Arc<RwLock<Vec<(String, bool)>>> = Arc::new(RwLock::new(
-        sources.iter().map(|s| (s.name().to_string(), false)).collect(),
+    let source_status: Arc<RwLock<Vec<SourceStatus>>> = Arc::new(RwLock::new(
+        sources
+            .iter()
+            .map(|s| SourceStatus {
+                name: s.name().to_string(),
+                connected: false,
+                last_error: None,
+            })
+            .collect(),
     ));
+
+    // Build one Notify per source so the UI can trigger an immediate poll.
+    let poll_triggers: Arc<HashMap<String, Arc<Notify>>> = Arc::new(
+        sources
+            .iter()
+            .map(|s| (s.name().to_string(), Arc::new(Notify::new())))
+            .collect(),
+    );
 
     let shared_config = Arc::new(RwLock::new(config.clone()));
 
@@ -72,6 +89,7 @@ async fn main() -> Result<()> {
         config_path: config_path.clone(),
         storage: storage.clone(),
         source_status: source_status.clone(),
+        poll_triggers: poll_triggers.clone(),
         session_token: Arc::new(RwLock::new(uuid::Uuid::new_v4().to_string())),
     };
 
@@ -80,6 +98,10 @@ async fn main() -> Result<()> {
         let storage_clone = storage.clone();
         let filters = config.filters.clone();
         let status_clone = source_status.clone();
+        let trigger = poll_triggers
+            .get(source.name())
+            .cloned()
+            .unwrap_or_else(|| Arc::new(Notify::new()));
         let poll_interval = {
             let name = source.name().to_string();
             let interval = shared_config
@@ -95,7 +117,7 @@ async fn main() -> Result<()> {
         };
 
         tokio::spawn(async move {
-            poll_source(source, storage_clone, filters, status_clone, poll_interval).await;
+            poll_source(source, storage_clone, filters, status_clone, trigger, poll_interval).await;
         });
     }
 
@@ -115,7 +137,8 @@ async fn poll_source(
     source: Arc<dyn MessageSource>,
     storage: Arc<Storage>,
     filters: Vec<config::FilterConfig>,
-    status: Arc<RwLock<Vec<(String, bool)>>>,
+    status: Arc<RwLock<Vec<SourceStatus>>>,
+    trigger: Arc<Notify>,
     interval_secs: u64,
 ) {
     let name = source.name().to_string();
@@ -125,12 +148,13 @@ async fn poll_source(
 
         match result {
             Ok(Ok(messages)) => {
-                // Update connection status
+                // Update connection status – clear any previous error.
                 {
                     let mut s = status.write().unwrap();
                     for entry in s.iter_mut() {
-                        if entry.0 == name {
-                            entry.1 = true;
+                        if entry.name == name {
+                            entry.connected = true;
+                            entry.last_error = None;
                         }
                     }
                 }
@@ -149,19 +173,35 @@ async fn poll_source(
                 }
             }
             Ok(Err(e)) => {
-                warn!("[{}] poll error: {}", name, e);
+                let err_str = e.to_string();
+                warn!("[{}] poll error: {}", name, err_str);
                 let mut s = status.write().unwrap();
                 for entry in s.iter_mut() {
-                    if entry.0 == name {
-                        entry.1 = false;
+                    if entry.name == name {
+                        entry.connected = false;
+                        entry.last_error = Some(err_str.clone());
                     }
                 }
             }
             Err(e) => {
-                error!("[{}] poller task panicked: {}", name, e);
+                let err_str = format!("poller task panicked: {}", e);
+                error!("[{}] {}", name, err_str);
+                let mut s = status.write().unwrap();
+                for entry in s.iter_mut() {
+                    if entry.name == name {
+                        entry.connected = false;
+                        entry.last_error = Some(err_str.clone());
+                    }
+                }
             }
         }
 
-        tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+        // Wait for either the regular interval or a manual trigger.
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {}
+            _ = trigger.notified() => {
+                info!("[{}] manual poll triggered", name);
+            }
+        }
     }
 }

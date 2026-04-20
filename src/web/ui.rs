@@ -1,5 +1,6 @@
 use crate::config::AccountConfig;
 use crate::storage::Task;
+use crate::web::SourceStatus;
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -196,6 +197,13 @@ code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; backg
 .nav-card:hover { border-color: #aaa; text-decoration: none; }
 .nav-card-title { font-weight: 600; font-size: 0.92rem; margin-bottom: 2px; }
 .nav-card-sub { font-size: 0.78rem; color: var(--muted); }
+.last-error {
+  font-size: 0.76rem;
+  color: var(--danger);
+  margin-top: 6px;
+  word-break: break-all;
+}
+.error-label { font-weight: 600; }
 "#;
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
@@ -576,7 +584,7 @@ pub fn admin_dashboard(
 
 pub fn admin_email_integrations(
     accounts: &[&AccountConfig],
-    source_status: &[(String, bool)],
+    source_status: &[SourceStatus],
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
@@ -643,7 +651,7 @@ pub fn admin_email_integrations(
 
 pub fn admin_telegram_integrations(
     accounts: &[&AccountConfig],
-    source_status: &[(String, bool)],
+    source_status: &[SourceStatus],
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
@@ -692,12 +700,12 @@ pub fn admin_telegram_integrations(
 }
 
 /// Shared card used on both integration detail pages.
-fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &str) -> String {
-    let connected = source_status
+fn integration_card(a: &AccountConfig, source_status: &[SourceStatus], base: &str) -> String {
+    let status_entry = source_status
         .iter()
-        .find(|(n, _)| n.ends_with(&a.name))
-        .map(|(_, ok)| *ok)
-        .unwrap_or(false);
+        .find(|s| s.name.ends_with(&a.name));
+    let connected = status_entry.map(|s| s.connected).unwrap_or(false);
+    let last_error = status_entry.and_then(|s| s.last_error.as_deref());
     let dot = if connected { "dot-ok" } else { "dot-off" };
     let status_text = if connected { "connected" } else { "offline" };
     let enabled_badge = if a.enabled {
@@ -705,11 +713,22 @@ fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &
     } else {
         "<span class=\"badge badge-off\">disabled</span>"
     };
+    let error_html = match last_error {
+        Some(err) => format!(
+            r#"<div class="last-error"><span class="error-label">Last error:</span> {}</div>"#,
+            html_escape(err)
+        ),
+        None => String::new(),
+    };
     format!(
         r#"<div class="card">
   <div class="card-title"><span class="status-dot {dot}"></span>{name}</div>
   <div class="card-meta">{atype} &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled} &nbsp;·&nbsp; poll every {poll}s</div>
+  {error_html}
   <div class="actions">
+    <form class="inline" method="post" action="{base}/{name}/poll">
+      <button type="submit" class="secondary">Poll now</button>
+    </form>
     <form class="inline" method="post" action="{base}/{name}/delete">
       <button type="submit" class="danger">Remove</button>
     </form>
@@ -722,6 +741,7 @@ fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &
         enabled = enabled_badge,
         poll = a.poll_interval_secs,
         base = base,
+        error_html = error_html,
     )
 }
 
