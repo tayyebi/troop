@@ -68,6 +68,7 @@ pub async fn add_task(
         from: "web".to_string(),
         source: "web".to_string(),
         done: false,
+        message_id: None,
     };
     match state.storage.create_task(&task) {
         Ok(_) => flash_redirect("/tasks", &format!("Task [{}] added.", id)),

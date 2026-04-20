@@ -109,6 +109,7 @@ pub fn execute(cmd: &Command, msg: &Message, storage: &Storage) -> Result<String
                 from: msg.from.clone(),
                 source: msg.source.clone(),
                 done: false,
+                message_id: msg.headers.get("message-id").cloned(),
             };
             storage.create_task(&task)?;
             Ok(format!("Task added: [{}] {}", id, title))

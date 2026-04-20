@@ -17,6 +17,9 @@ pub struct Task {
     pub from: String,
     pub source: String,
     pub done: bool,
+    /// Email Message-ID of the message that originally created this task.
+    /// Used to set the `In-Reply-To` header when sending completion notices.
+    pub message_id: Option<String>,
 }
 
 // File format
@@ -40,6 +43,9 @@ fn format_task_file(task: &Task) -> String {
     s.push_str(&format!("created: {}\n", task.created.to_rfc3339()));
     s.push_str(&format!("from: {}\n", task.from));
     s.push_str(&format!("source: {}\n", task.source));
+    if let Some(ref mid) = task.message_id {
+        s.push_str(&format!("message_id: {}\n", mid));
+    }
     s.push_str("---\n");
     s.push_str(&format!("# {}\n", task.title));
     if !task.description.is_empty() {
@@ -58,6 +64,7 @@ fn parse_task_file(path: &Path, done: bool) -> Result<Task> {
     let mut created = Utc::now();
     let mut from = String::new();
     let mut source = String::new();
+    let mut message_id: Option<String> = None;
     let mut title = String::new();
     let mut in_body = false;
     let mut body_lines: Vec<&str> = Vec::new();
@@ -79,6 +86,8 @@ fn parse_task_file(path: &Path, done: bool) -> Result<Task> {
                 from = val.to_string();
             } else if let Some(val) = line.strip_prefix("source: ") {
                 source = val.to_string();
+            } else if let Some(val) = line.strip_prefix("message_id: ") {
+                message_id = Some(val.to_string());
             }
         } else {
             // First body line starting with "# " is the title
@@ -103,18 +112,19 @@ fn parse_task_file(path: &Path, done: bool) -> Result<Task> {
     let description = body_lines.join("\n");
 
     if id.is_empty() {
-        // Fall back: derive id from filename stem
+        // Fall back: derive id from filename stem, stripping a leading dot if present
         id = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
+            .trim_start_matches('.')
             .to_string();
     }
     if title.is_empty() {
         title = id.clone();
     }
 
-    Ok(Task { id, title, description, created, from, source, done })
+    Ok(Task { id, title, description, created, from, source, done, message_id })
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
@@ -184,18 +194,22 @@ impl Storage {
         Self::validate_id(id)?;
         let todo_path = self.task_path(id, false);
         let done_path = self.task_path(id, true);
+        let replied_path = self.done_dir.join(format!(".{}.md", id));
         if todo_path.exists() {
             fs::remove_file(todo_path)?;
             Ok(true)
         } else if done_path.exists() {
             fs::remove_file(done_path)?;
             Ok(true)
+        } else if replied_path.exists() {
+            fs::remove_file(replied_path)?;
+            Ok(true)
         } else {
             Ok(false)
         }
     }
 
-    /// Get a single task by id (searches both todo and done).
+    /// Get a single task by id (searches todo, done, and replied-done).
     pub fn get_task(&self, id: &str) -> Result<Option<Task>> {
         Self::validate_id(id)?;
         let todo_path = self.task_path(id, false);
@@ -205,6 +219,11 @@ impl Storage {
         let done_path = self.task_path(id, true);
         if done_path.exists() {
             return Ok(Some(parse_task_file(&done_path, true)?));
+        }
+        // Also check for replied (dot-prefixed) file in done dir.
+        let replied_path = self.done_dir.join(format!(".{}.md", id));
+        if replied_path.exists() {
+            return Ok(Some(parse_task_file(&replied_path, true)?));
         }
         Ok(None)
     }
@@ -235,9 +254,56 @@ impl Storage {
         self.list_dir(&self.todo_dir, false)
     }
 
-    /// List all completed tasks (done).
+    /// List all completed tasks (done), including those already replied to.
     pub fn list_done(&self) -> Result<Vec<Task>> {
         self.list_dir(&self.done_dir, true)
+    }
+
+    /// List completed tasks that have NOT yet been replied to.
+    ///
+    /// These are done-dir files whose filename does NOT start with a `.`.
+    /// Once a reply is sent, the file is renamed to start with `.` via
+    /// [`mark_replied`].
+    pub fn list_done_unreplied(&self) -> Result<Vec<Task>> {
+        let mut tasks = Vec::new();
+        let dir = &self.done_dir;
+        if !dir.exists() {
+            return Ok(tasks);
+        }
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            // Skip files already replied (dot-prefixed stem)
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            if stem.starts_with('.') {
+                continue;
+            }
+            match parse_task_file(&path, true) {
+                Ok(task) => tasks.push(task),
+                Err(e) => tracing::warn!("skipping malformed task file {}: {}", path.display(), e),
+            }
+        }
+        tasks.sort_by(|a, b| b.created.cmp(&a.created));
+        Ok(tasks)
+    }
+
+    /// Mark a done task as replied by renaming `<id>.md` → `.<id>.md`.
+    ///
+    /// Returns `true` if the file was found and renamed, `false` if it was not
+    /// found (already renamed or task doesn't exist).
+    pub fn mark_replied(&self, id: &str) -> Result<bool> {
+        Self::validate_id(id)?;
+        let current = self.done_dir.join(format!("{}.md", id));
+        let replied = self.done_dir.join(format!(".{}.md", id));
+        if current.exists() {
+            fs::rename(&current, &replied)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Summary counts.
@@ -276,5 +342,94 @@ mod tests {
     fn oversized_id_is_rejected() {
         let long = "a".repeat(65);
         assert!(Storage::validate_id(&long).is_err());
+    }
+
+    fn make_test_storage() -> (Storage, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let todo_dir = tmp.path().join("todo");
+        let done_dir = tmp.path().join("done");
+        std::fs::create_dir_all(&todo_dir).unwrap();
+        std::fs::create_dir_all(&done_dir).unwrap();
+        let storage = Storage {
+            todo_dir,
+            done_dir,
+        };
+        (storage, tmp)
+    }
+
+    fn sample_task(id: &str) -> Task {
+        Task {
+            id: id.to_string(),
+            title: "Test Task".to_string(),
+            description: "desc".to_string(),
+            created: Utc::now(),
+            from: "alice@example.com".to_string(),
+            source: "imap:main".to_string(),
+            done: false,
+            message_id: Some("<test-id@example.com>".to_string()),
+        }
+    }
+
+    #[test]
+    fn message_id_roundtrips_through_file() {
+        let (storage, _tmp) = make_test_storage();
+        let task = sample_task("abc12345");
+        storage.create_task(&task).unwrap();
+
+        let loaded = storage.get_task("abc12345").unwrap().unwrap();
+        assert_eq!(loaded.message_id.as_deref(), Some("<test-id@example.com>"));
+    }
+
+    #[test]
+    fn mark_replied_renames_file() {
+        let (storage, _tmp) = make_test_storage();
+        let mut task = sample_task("abc12345");
+        task.done = true;
+        // Simulate a done task by writing directly into done_dir.
+        let done_path = storage.done_dir.join("abc12345.md");
+        std::fs::write(&done_path, format_task_file(&task)).unwrap();
+
+        assert!(storage.mark_replied("abc12345").unwrap());
+
+        let replied_path = storage.done_dir.join(".abc12345.md");
+        assert!(replied_path.exists());
+        assert!(!done_path.exists());
+    }
+
+    #[test]
+    fn list_done_unreplied_excludes_replied_files() {
+        let (storage, _tmp) = make_test_storage();
+        let mut task = sample_task("aaa11111");
+        task.done = true;
+        let done_path = storage.done_dir.join("aaa11111.md");
+        std::fs::write(&done_path, format_task_file(&task)).unwrap();
+
+        // Before marking replied, the task appears in unreplied list.
+        let unreplied = storage.list_done_unreplied().unwrap();
+        assert_eq!(unreplied.len(), 1);
+
+        storage.mark_replied("aaa11111").unwrap();
+
+        // After marking replied, unreplied list is empty.
+        let unreplied = storage.list_done_unreplied().unwrap();
+        assert!(unreplied.is_empty());
+
+        // But list_done still returns it.
+        let all_done = storage.list_done().unwrap();
+        assert_eq!(all_done.len(), 1);
+    }
+
+    #[test]
+    fn get_task_finds_replied_done_task() {
+        let (storage, _tmp) = make_test_storage();
+        let mut task = sample_task("bbb22222");
+        task.done = true;
+        let done_path = storage.done_dir.join("bbb22222.md");
+        std::fs::write(&done_path, format_task_file(&task)).unwrap();
+        storage.mark_replied("bbb22222").unwrap();
+
+        let found = storage.get_task("bbb22222").unwrap().unwrap();
+        assert_eq!(found.id, "bbb22222");
+        assert!(found.done);
     }
 }

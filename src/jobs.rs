@@ -89,6 +89,9 @@ impl JobInfo {
 
 // ── Job manager ───────────────────────────────────────────────────────────────
 
+/// Special job key used for the done-task reply background worker.
+const DONE_REPLY_WORKER: &str = "__done_reply_worker__";
+
 /// Manages all background polling jobs.
 ///
 /// Internally stores a `JoinHandle` per source so individual pollers can be
@@ -131,6 +134,8 @@ impl JobManager {
             );
             self.spawn_poller(source, account.clone(), config.filters.clone());
         }
+        // Always run the done-task reply worker regardless of how many accounts exist.
+        self.spawn_done_reply_worker(config.accounts.clone());
     }
 
     /// Stop all running pollers and respawn them using the supplied `config`.
@@ -257,6 +262,32 @@ impl JobManager {
     pub fn all_jobs(&self) -> Vec<JobInfo> {
         self.status.read().unwrap().clone()
     }
+
+    /// Spawn (or respawn) the background worker that sends completion replies
+    /// for done tasks and marks them as replied.
+    ///
+    /// The worker runs every 60 seconds, independent of the poller interval.
+    /// It is automatically restarted by [`restart_all`] when the config changes,
+    /// ensuring it always uses the current SMTP settings.
+    pub fn spawn_done_reply_worker(self: &Arc<Self>, accounts: Vec<AccountConfig>) {
+        // Abort any existing instance.
+        {
+            let mut handles = self.handles.lock().unwrap();
+            if let Some(h) = handles.remove(DONE_REPLY_WORKER) {
+                h.abort();
+            }
+        }
+
+        let storage_clone = self.storage.clone();
+        let handle = tokio::spawn(async move {
+            run_done_reply_worker(storage_clone, accounts).await;
+        });
+
+        self.handles
+            .lock()
+            .unwrap()
+            .insert(DONE_REPLY_WORKER.to_string(), handle);
+    }
 }
 
 // ── Poller loop ───────────────────────────────────────────────────────────────
@@ -381,6 +412,110 @@ async fn run_poller(
             _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {}
             _ = notified => {
                 info!("[{}] manual poll triggered", name);
+            }
+        }
+    }
+}
+
+// ── Done-task reply worker ────────────────────────────────────────────────────
+
+/// Background worker that scans the done directory every 60 seconds for tasks
+/// that have not yet received a completion reply, and sends one.
+///
+/// A task is eligible when:
+/// * It originated from an email source (`imap:` / `pop3:` prefix in `source`).
+/// * Its sender (`from`) looks like an email address (contains `@`).
+/// * The matching account has SMTP configured (`smtp_host` is set).
+///
+/// Once the reply is successfully sent, [`Storage::mark_replied`] is called
+/// to rename the task file from `<id>.md` to `.<id>.md`, preventing retries.
+///
+/// Tasks that cannot receive an email reply (Telegram, web-created, etc.) are
+/// silently skipped every iteration without being renamed.
+async fn run_done_reply_worker(storage: Arc<Storage>, accounts: Vec<AccountConfig>) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+
+        let tasks = match storage.list_done_unreplied() {
+            Ok(t) => t,
+            Err(e) => {
+                error!("[done_reply] failed to list unreplied done tasks: {}", e);
+                continue;
+            }
+        };
+
+        for task in tasks {
+            // Only process email-originated tasks.
+            if !task.source.starts_with("imap:") && !task.source.starts_with("pop3:") {
+                continue;
+            }
+
+            // Must have a plausible email address as the sender.
+            if task.from.is_empty() || !task.from.contains('@') {
+                continue;
+            }
+
+            // Derive the account name from the source prefix (e.g. "imap:work" → "work").
+            let account_name = task.source.splitn(2, ':').nth(1).unwrap_or(&task.source);
+
+            // Find the matching account that has SMTP configured.
+            let account = match accounts
+                .iter()
+                .find(|a| a.name == account_name && a.smtp_host.is_some())
+            {
+                Some(a) => a,
+                None => {
+                    // No SMTP config for this source – silently skip, will retry later
+                    // in case SMTP is configured after the task was created.
+                    continue;
+                }
+            };
+
+            let subject = format!("Task completed: {}", task.title);
+            let body = format!(
+                "Your task has been completed.\n\nTask ID: {}\nTitle:   {}\nCreated: {}",
+                task.id,
+                task.title,
+                task.created.format("%Y-%m-%d %H:%M UTC"),
+            );
+
+            // SMTP operations are blocking – run them off the async executor.
+            let acc_clone = account.clone();
+            let to = task.from.clone();
+            let subject_clone = subject.clone();
+            let body_clone = body.clone();
+            let send_result =
+                tokio::task::spawn_blocking(move || {
+                    smtp::send_reply(&acc_clone, &to, &subject_clone, &body_clone)
+                })
+                .await;
+
+            match send_result {
+                Ok(Ok(())) => {
+                    info!(
+                        "[done_reply] sent completion reply for task '{}' to '{}'",
+                        task.id, task.from
+                    );
+                    if let Err(e) = storage.mark_replied(&task.id) {
+                        error!(
+                            "[done_reply] failed to mark task '{}' as replied: {}",
+                            task.id, e
+                        );
+                    }
+                }
+                Ok(Err(e)) => {
+                    error!(
+                        "[done_reply] failed to send reply for task '{}': {}",
+                        task.id, e
+                    );
+                    // Do not mark as replied – will retry on the next tick.
+                }
+                Err(e) => {
+                    error!(
+                        "[done_reply] reply task panicked for '{}': {}",
+                        task.id, e
+                    );
+                }
             }
         }
     }
