@@ -33,8 +33,8 @@ pub fn send_reply(account: &AccountConfig, to: &str, subject: &str, body: &str) 
     let from_addr = account
         .reply_from
         .as_deref()
-        .or(account.username.as_deref())
-        .context("No sender address: set reply_from or username in the account config")?;
+        .or(account.smtp_username.as_deref())
+        .context("No sender address: set reply_from or smtp_username in the account config")?;
 
     let to_addr = extract_email_address(to);
 
