@@ -68,6 +68,7 @@ pub async fn add_task(
         from: "web".to_string(),
         source: "web".to_string(),
         done: false,
+        message_id: None,
     };
     match state.storage.create_task(&task) {
         Ok(_) => flash_redirect("/tasks", &format!("Task [{}] added.", id)),
@@ -151,6 +152,13 @@ pub struct AddEmailForm {
     pub tls: Option<String>,
     /// Checkbox: present means true, absent means false.
     pub enabled: Option<String>,
+    // SMTP reply fields
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_tls: Option<String>,
+    pub reply_from: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -164,6 +172,14 @@ pub struct EditEmailForm {
     pub poll_interval_secs: Option<String>,
     pub tls: Option<String>,
     pub enabled: Option<String>,
+    // SMTP reply fields
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<String>,
+    pub smtp_username: Option<String>,
+    /// Leave blank to keep the existing SMTP password unchanged.
+    pub smtp_password: Option<String>,
+    pub smtp_tls: Option<String>,
+    pub reply_from: Option<String>,
 }
 
 pub async fn email_integrations_page(
@@ -194,6 +210,8 @@ pub async fn add_email_integration(
         .unwrap_or(60);
     let tls = form.tls.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
     let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
+    let smtp_port = form.smtp_port.as_deref().and_then(|p| p.parse::<u16>().ok());
+    let smtp_tls = form.smtp_tls.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
     let account = AccountConfig {
         name: form.name.trim().to_string(),
         account_type,
@@ -205,6 +223,12 @@ pub async fn add_email_integration(
         token: None,
         enabled,
         poll_interval_secs: poll,
+        smtp_host: nonempty(form.smtp_host),
+        smtp_port,
+        smtp_username: nonempty(form.smtp_username),
+        smtp_password: nonempty(form.smtp_password),
+        smtp_tls,
+        reply_from: nonempty(form.reply_from),
     };
     {
         let mut cfg = state.config.write().unwrap();
@@ -267,6 +291,8 @@ pub async fn update_email_integration(
         .unwrap_or(60);
     let tls = form.tls.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
     let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
+    let smtp_port = form.smtp_port.as_deref().and_then(|p| p.parse::<u16>().ok());
+    let smtp_tls = form.smtp_tls.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
 
     {
         let mut cfg = state.config.write().unwrap();
@@ -285,6 +311,14 @@ pub async fn update_email_integration(
                 account.tls = tls;
                 account.enabled = enabled;
                 account.poll_interval_secs = poll;
+                account.smtp_host = nonempty(form.smtp_host);
+                account.smtp_port = smtp_port;
+                account.smtp_username = nonempty(form.smtp_username);
+                if let Some(pw) = nonempty(form.smtp_password) {
+                    account.smtp_password = Some(pw);
+                }
+                account.smtp_tls = smtp_tls;
+                account.reply_from = nonempty(form.reply_from);
             }
         }
         if let Err(e) = cfg.save(&state.config_path) {
@@ -345,6 +379,12 @@ pub async fn add_telegram_integration(
         token: nonempty(Some(form.token)),
         enabled,
         poll_interval_secs: poll,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_username: None,
+        smtp_password: None,
+        smtp_tls: true,
+        reply_from: None,
     };
     {
         let mut cfg = state.config.write().unwrap();

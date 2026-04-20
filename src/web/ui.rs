@@ -676,6 +676,34 @@ pub fn admin_email_integrations(
         Enabled
       </label>
     </div>
+    <div class="divider"></div>
+    <h2 style="margin-bottom:12px">SMTP (optional – for sending replies)</h2>
+    <div class="form-group">
+      <label>SMTP host</label>
+      <input type="text" name="smtp_host" placeholder="smtp.example.com">
+    </div>
+    <div class="form-group">
+      <label>SMTP port</label>
+      <input type="number" name="smtp_port" placeholder="465">
+    </div>
+    <div class="form-group">
+      <label>SMTP username</label>
+      <input type="text" name="smtp_username" placeholder="you@example.com">
+    </div>
+    <div class="form-group">
+      <label>SMTP password</label>
+      <input type="password" name="smtp_password" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="smtp_tls" value="true" checked style="width:auto">
+        Use implicit TLS (port 465). Uncheck for STARTTLS (port 587).
+      </label>
+    </div>
+    <div class="form-group">
+      <label>Reply-From address <span style="color:var(--muted);font-weight:400">(optional, defaults to SMTP username)</span></label>
+      <input type="text" name="reply_from" placeholder="troop@example.com">
+    </div>
     <button type="submit">Add account</button>
   </form>
 </div>"#;
@@ -823,6 +851,12 @@ pub fn admin_edit_email_integration(
     let tls_checked = if a.tls { " checked" } else { "" };
     let enabled_checked = if a.enabled { " checked" } else { "" };
     let name_url = urlencoding::encode(&a.name).to_string();
+    // SMTP fields
+    let smtp_host_val = a.smtp_host.as_deref().unwrap_or("");
+    let smtp_port_val = a.smtp_port.map(|p| p.to_string()).unwrap_or_default();
+    let smtp_username_val = a.smtp_username.as_deref().unwrap_or("");
+    let smtp_tls_checked = if a.smtp_tls { " checked" } else { "" };
+    let reply_from_val = a.reply_from.as_deref().unwrap_or("");
 
     let body = format!(
         r#"<div style="margin-bottom:12px"><a href="/admin/integrations/email">← Email accounts</a></div>
@@ -868,6 +902,34 @@ pub fn admin_edit_email_integration(
         Enabled
       </label>
     </div>
+    <div class="divider"></div>
+    <h2 style="margin-bottom:12px">SMTP (optional – for sending replies)</h2>
+    <div class="form-group">
+      <label>SMTP host</label>
+      <input type="text" name="smtp_host" value="{smtp_host}" placeholder="smtp.example.com">
+    </div>
+    <div class="form-group">
+      <label>SMTP port</label>
+      <input type="number" name="smtp_port" value="{smtp_port}" placeholder="465">
+    </div>
+    <div class="form-group">
+      <label>SMTP username</label>
+      <input type="text" name="smtp_username" value="{smtp_username}" placeholder="you@example.com">
+    </div>
+    <div class="form-group">
+      <label>SMTP password <span style="color:var(--muted);font-weight:400">(leave blank to keep existing)</span></label>
+      <input type="password" name="smtp_password" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="smtp_tls" value="true"{smtp_tls_checked} style="width:auto">
+        Use implicit TLS (port 465). Uncheck for STARTTLS (port 587).
+      </label>
+    </div>
+    <div class="form-group">
+      <label>Reply-From address <span style="color:var(--muted);font-weight:400">(optional, defaults to SMTP username)</span></label>
+      <input type="text" name="reply_from" value="{reply_from}" placeholder="troop@example.com">
+    </div>
     <div style="display:flex;gap:7px">
       <button type="submit">Save changes</button>
       <a href="/admin/integrations/email" class="btn secondary">Cancel</a>
@@ -884,6 +946,11 @@ pub fn admin_edit_email_integration(
         poll = html_escape(&poll_val),
         tls_checked = tls_checked,
         enabled_checked = enabled_checked,
+        smtp_host = html_escape(smtp_host_val),
+        smtp_port = html_escape(&smtp_port_val),
+        smtp_username = html_escape(smtp_username_val),
+        smtp_tls_checked = smtp_tls_checked,
+        reply_from = html_escape(reply_from_val),
     );
 
     page(&format!("Edit {}", &a.name), "/admin", flash, &body, has_password)
