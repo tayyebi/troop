@@ -178,6 +178,11 @@ pre {
 .login-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 24px; width: 100%; }
 .login-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
 .login-sub { font-size: 0.82rem; color: var(--muted); margin-bottom: 22px; }
+.cmd-table { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.cmd-row { display: flex; gap: 12px; align-items: baseline; background: #fff; padding: 9px 12px; }
+.cmd-code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.78rem; white-space: nowrap; color: #111; flex-shrink: 0; }
+.cmd-desc { font-size: 0.82rem; color: var(--muted); }
+code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
 "#;
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
@@ -324,19 +329,61 @@ pub fn change_password_page(has_current_password: bool, flash: Option<&str>) -> 
 // ── Task list ─────────────────────────────────────────────────────────────────
 
 pub fn task_list(todo: &[Task], done: &[Task], flash: Option<&str>) -> String {
-    let add_form = r#"<div class="card" style="margin-bottom:18px">
-  <h2 style="margin-bottom:10px">New Task</h2>
-  <form method="post" action="/tasks">
-    <div class="form-group">
-      <label for="title">Title</label>
-      <input type="text" id="title" name="title" required placeholder="Task title…">
+    let docs = r#"<div class="card" style="margin-bottom:18px">
+  <h2 style="margin-bottom:12px">How to create tasks via email</h2>
+  <p style="font-size:0.88rem;color:var(--muted);margin-bottom:14px">
+    Send an email to your configured IMAP or POP3 account.
+    troop polls the inbox on its configured interval and turns messages into tasks.
+    Commands are read from the <strong>subject line</strong> or the
+    <strong>first non-empty line of the body</strong>, prefixed with <code>TROOP</code>.
+  </p>
+
+  <h2 style="margin-bottom:8px">Commands</h2>
+  <div class="cmd-table">
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP add &lt;title&gt;</code>
+      <span class="cmd-desc">Create a new task. The email body becomes the description.</span>
     </div>
-    <div class="form-group">
-      <label for="desc">Description (optional)</label>
-      <textarea id="desc" name="description" placeholder="Details…"></textarea>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP list</code>
+      <span class="cmd-desc">Reply with all pending task IDs and titles.</span>
     </div>
-    <button type="submit">Add Task</button>
-  </form>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP status</code>
+      <span class="cmd-desc">Reply with pending and done counts.</span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP done &lt;id&gt;</code>
+      <span class="cmd-desc">Mark the task with the given ID as done.</span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP show &lt;id&gt;</code>
+      <span class="cmd-desc">Reply with the full detail of a task.</span>
+    </div>
+  </div>
+
+  <h2 style="margin-top:16px;margin-bottom:8px">Example emails</h2>
+  <pre>Subject: TROOP add Buy groceries
+Body:    Milk, eggs, bread — check the list on the fridge.</pre>
+  <pre style="margin-top:8px">Subject: TROOP done a1b2c3d4</pre>
+  <pre style="margin-top:8px">Subject: TROOP list</pre>
+
+  <h2 style="margin-top:16px;margin-bottom:8px">Minimal config (<code>troop.toml</code>)</h2>
+  <pre>[[accounts]]
+name     = "work-email"
+type     = "imap"
+host     = "imap.example.com"
+port     = 993
+username = "you@example.com"
+password = "app-password"
+tls      = true
+poll_interval_secs = 60</pre>
+
+  <p style="font-size:0.82rem;color:var(--muted);margin-top:12px">
+    Restrict which senders are trusted under
+    <a href="/admin/filters">Admin → Filters</a>.
+    Add or remove accounts under <a href="/admin">Admin</a>.
+  </p>
 </div>"#;
 
     let todo_cards = if todo.is_empty() {
@@ -352,12 +399,12 @@ pub fn task_list(todo: &[Task], done: &[Task], flash: Option<&str>) -> String {
     };
 
     let body = format!(
-        r#"{add_form}
+        r#"{docs}
 <div class="section-header"><h2>Pending ({todo_count})</h2></div>
 {todo_cards}
 <div class="section-header"><h2>Done ({done_count})</h2></div>
 {done_cards}"#,
-        add_form = add_form,
+        docs = docs,
         todo_count = todo.len(),
         todo_cards = todo_cards,
         done_count = done.len(),
