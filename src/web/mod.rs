@@ -75,8 +75,24 @@ pub fn build_router(state: AppState) -> Router {
     // Admin routes are protected by the auth middleware.
     let admin_routes = Router::new()
         .route("/admin", get(handlers::admin_dashboard))
-        .route("/admin/accounts", post(handlers::add_account))
-        .route("/admin/accounts/:name/delete", post(handlers::delete_account))
+        // Integration management – email
+        .route(
+            "/admin/integrations/email",
+            get(handlers::email_integrations_page).post(handlers::add_email_integration),
+        )
+        .route(
+            "/admin/integrations/email/:name/delete",
+            post(handlers::delete_email_integration),
+        )
+        // Integration management – telegram
+        .route(
+            "/admin/integrations/telegram",
+            get(handlers::telegram_integrations_page).post(handlers::add_telegram_integration),
+        )
+        .route(
+            "/admin/integrations/telegram/:name/delete",
+            post(handlers::delete_telegram_integration),
+        )
         .route(
             "/admin/filters",
             get(handlers::filter_list).post(handlers::add_filter),

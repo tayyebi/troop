@@ -9,15 +9,19 @@ Send an email or a Telegram message to create tasks — then manage them through
 
 | Tasks | Task detail |
 |-------|-------------|
-| ![Tasks page](https://github.com/user-attachments/assets/d3eedd7b-f3c9-4215-b7c7-0fa7140432d3) | ![Task detail](https://github.com/user-attachments/assets/5c451590-5276-40cb-bd8f-217358e9c492) |
+| ![Tasks](https://github.com/user-attachments/assets/30848f3e-7d34-4264-99ff-724395595e41) | ![Task detail](https://github.com/user-attachments/assets/6c9cb799-688e-493b-b431-d38528899cdd) |
 
-| Admin dashboard | Filters |
-|----------------|---------|
-| ![Admin](https://github.com/user-attachments/assets/dd47220e-ae68-4b39-a06f-b1c75105b5f7) | ![Filters](https://github.com/user-attachments/assets/8f76fa43-66f0-46f1-9963-c24d89157a91) |
+| Admin dashboard | Email integrations |
+|----------------|-------------------|
+| ![Admin](https://github.com/user-attachments/assets/8b113638-b7b4-4930-b3ce-7504c8dc8994) | ![Email integrations](https://github.com/user-attachments/assets/18f78f84-d0ac-45ea-8ed6-c67d0f55fd00) |
+
+| Telegram integrations | Filters |
+|----------------------|---------|
+| ![Telegram integrations](https://github.com/user-attachments/assets/10a74c14-5ebf-444a-8f23-9a84384dbd50) | ![Filters](https://github.com/user-attachments/assets/8e9a74fd-38b3-428e-ab65-b31856980593) |
 
 | Login | Change password |
 |-------|----------------|
-| ![Login](https://github.com/user-attachments/assets/faa5bb6c-6ec1-4216-a9bf-439cd90c5598) | ![Change password](https://github.com/user-attachments/assets/342b02ef-b01a-4fdf-8939-d559e4b10f34) |
+| ![Login](https://github.com/user-attachments/assets/085dd905-2670-4e6e-9809-d6e184b012f6) | ![Change password](https://github.com/user-attachments/assets/e073ab9f-464f-49fb-86e6-1d2776799762) |
 
 ---
 
@@ -158,21 +162,23 @@ Click a task title to open the detail view. It shows the full description, the s
 
 The **Admin** page (`/admin`) is the control panel. It shows task counts and manages accounts, filters, and the admin password.
 
-#### Email accounts
+#### Email integrations
 
-troop groups IMAP and POP3 accounts under *Email accounts*. Each card shows the account name, type, connection status (green = connected, grey = offline), and poll interval.
+Click **Email** on the admin dashboard to open the dedicated email management page. It lists all IMAP and POP3 accounts and shows each account's connection status (green dot = connected, grey = offline).
 
-- **Add** an account by filling the *Add Account* form at the bottom of the page.  
-  Required fields for email: *Name*, *Type*, *Host*, *Port*, *Username*, *Password*.
+- **Add** an account by filling the *Add email account* form.  
+  Required fields: *Name*, *Protocol* (IMAP or POP3), *Host*, *Port*, *Username*, *Password*.
 - **Remove** an account with the **Remove** button on its card.  
   Changes take effect after restarting troop.
 
-#### Telegram bots
+#### Telegram integrations
 
-Telegram bot accounts appear in the separate *Telegram bots* section. Create a bot with [@BotFather](https://t.me/BotFather), copy the token, and add it here.
+Click **Telegram** on the admin dashboard to open the dedicated Telegram management page.
 
-- Required fields: *Name*, *Type* = `Telegram`, *Bot Token*.
-- Changes take effect after restarting troop.
+- **Add** a bot by filling the *Add Telegram bot* form.  
+  Required fields: *Name*, *Bot token* (from [@BotFather](https://t.me/BotFather)).
+- **Remove** a bot with the **Remove** button on its card.  
+  Changes take effect after restarting troop.
 
 ---
 

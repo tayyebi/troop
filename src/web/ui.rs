@@ -1,4 +1,4 @@
-use crate::config::{AccountConfig, AccountType};
+use crate::config::AccountConfig;
 use crate::storage::Task;
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
@@ -183,6 +183,19 @@ pre {
 .cmd-code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.78rem; white-space: nowrap; color: #111; flex-shrink: 0; }
 .cmd-desc { font-size: 0.82rem; color: var(--muted); }
 code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.nav-card {
+  display: block;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+.nav-card:hover { border-color: #aaa; text-decoration: none; }
+.nav-card-title { font-weight: 600; font-size: 0.92rem; margin-bottom: 2px; }
+.nav-card-sub { font-size: 0.78rem; color: var(--muted); }
 "#;
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
@@ -517,10 +530,10 @@ pub fn task_detail(t: &Task, flash: Option<&str>) -> String {
 // ── Admin dashboard ───────────────────────────────────────────────────────────
 
 pub fn admin_dashboard(
-    accounts: &[AccountConfig],
-    source_status: &[(String, bool)],
     todo_count: usize,
     done_count: usize,
+    email_count: usize,
+    telegram_count: usize,
     has_password: bool,
     flash: Option<&str>,
 ) -> String {
@@ -535,79 +548,61 @@ pub fn admin_dashboard(
         total = todo_count + done_count,
     );
 
-    // Split accounts by type
-    let email_accounts: Vec<&AccountConfig> = accounts
-        .iter()
-        .filter(|a| matches!(a.account_type, AccountType::Imap | AccountType::Pop3))
-        .collect();
-    let telegram_accounts: Vec<&AccountConfig> = accounts
-        .iter()
-        .filter(|a| matches!(a.account_type, AccountType::Telegram))
-        .collect();
-
-    let account_card = |a: &AccountConfig| -> String {
-        let connected = source_status
-            .iter()
-            .find(|(n, _)| n.ends_with(&a.name))
-            .map(|(_, ok)| *ok)
-            .unwrap_or(false);
-        let dot = if connected { "dot-ok" } else { "dot-off" };
-        let status_text = if connected { "connected" } else { "offline" };
-        let enabled_badge = if a.enabled {
-            "<span class=\"badge badge-done\">enabled</span>"
-        } else {
-            "<span class=\"badge badge-off\">disabled</span>"
-        };
-        format!(
-            r#"<div class="card">
-  <div class="card-title"><span class="status-dot {dot}"></span>{name}</div>
-  <div class="card-meta">{atype} &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled} &nbsp;·&nbsp; poll every {poll}s</div>
-  <div class="actions">
-    <form class="inline" method="post" action="/admin/accounts/{name}/delete">
-      <button type="submit" class="danger">Remove</button>
-    </form>
-  </div>
+    let body = format!(
+        r#"{stats}
+<h2 style="margin-bottom:10px">Integrations</h2>
+<a href="/admin/integrations/email" class="nav-card">
+  <div class="nav-card-title">Email <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{email_count}</span></div>
+  <div class="nav-card-sub">IMAP and POP3 accounts</div>
+</a>
+<a href="/admin/integrations/telegram" class="nav-card">
+  <div class="nav-card-title">Telegram <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{tg_count}</span></div>
+  <div class="nav-card-sub">Telegram bots</div>
+</a>
+<div class="divider"></div>
+<div style="display:flex;gap:7px;flex-wrap:wrap">
+  <a href="/admin/filters" class="btn secondary">Filters</a>
+  <a href="/admin/password" class="btn secondary">Change password</a>
 </div>"#,
-            dot = dot,
-            name = html_escape(&a.name),
-            atype = a.account_type,
-            status = status_text,
-            enabled = enabled_badge,
-            poll = a.poll_interval_secs,
-        )
-    };
+        stats = stats,
+        email_count = email_count,
+        tg_count = telegram_count,
+    );
 
-    let email_rows = if email_accounts.is_empty() {
+    page("Admin", "/admin", flash, &body, has_password)
+}
+
+// ── Email integrations page ───────────────────────────────────────────────────
+
+pub fn admin_email_integrations(
+    accounts: &[&AccountConfig],
+    source_status: &[(String, bool)],
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let account_cards = if accounts.is_empty() {
         "<p class=\"empty\">No email accounts configured.</p>".to_string()
     } else {
-        email_accounts.iter().map(|a| account_card(*a)).collect::<Vec<_>>().join("\n")
+        accounts.iter().map(|a| integration_card(a, source_status, "/admin/integrations/email")).collect::<Vec<_>>().join("\n")
     };
 
-    let telegram_rows = if telegram_accounts.is_empty() {
-        "<p class=\"empty\">No Telegram bots configured.</p>".to_string()
-    } else {
-        telegram_accounts.iter().map(|a| account_card(*a)).collect::<Vec<_>>().join("\n")
-    };
-
-    // Add account form
-    let add_account_form = r#"<div class="card" style="margin-top:8px">
-  <h2 style="margin-bottom:12px">Add Account</h2>
-  <form method="post" action="/admin/accounts">
+    let add_form = r#"<div class="card" style="margin-top:8px">
+  <h2 style="margin-bottom:12px">Add email account</h2>
+  <form method="post" action="/admin/integrations/email">
     <div class="form-group">
       <label>Name</label>
       <input type="text" name="name" required placeholder="e.g. work-email">
     </div>
     <div class="form-group">
-      <label>Type</label>
+      <label>Protocol</label>
       <select name="account_type">
         <option value="imap">IMAP</option>
         <option value="pop3">POP3</option>
-        <option value="telegram">Telegram</option>
       </select>
     </div>
     <div class="form-group">
-      <label>Host <span style="color:var(--muted);font-weight:400">(IMAP / POP3)</span></label>
-      <input type="text" name="host" placeholder="imap.example.com">
+      <label>Host</label>
+      <input type="text" name="host" required placeholder="imap.example.com">
     </div>
     <div class="form-group">
       <label>Port</label>
@@ -615,15 +610,11 @@ pub fn admin_dashboard(
     </div>
     <div class="form-group">
       <label>Username</label>
-      <input type="text" name="username" placeholder="user@example.com">
+      <input type="text" name="username" required placeholder="you@example.com">
     </div>
     <div class="form-group">
       <label>Password</label>
-      <input type="password" name="password">
-    </div>
-    <div class="form-group">
-      <label>Bot Token <span style="color:var(--muted);font-weight:400">(Telegram only)</span></label>
-      <input type="text" name="token" placeholder="123456:ABC…">
+      <input type="password" name="password" required>
     </div>
     <div class="form-group">
       <label>Poll interval (seconds)</label>
@@ -633,30 +624,105 @@ pub fn admin_dashboard(
   </form>
 </div>"#;
 
-    let action_btns = format!(
-        r#"<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:22px">
-  <a href="/admin/filters" class="btn secondary">Filters</a>
-  <a href="/admin/password" class="btn secondary">Change password</a>
-</div>"#
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin">← Admin</a></div>
+<div class="section-header" style="margin-top:0">
+  <h2>Email accounts ({count})</h2>
+</div>
+{account_cards}
+{add_form}"#,
+        count = accounts.len(),
+        account_cards = account_cards,
+        add_form = add_form,
     );
+
+    page("Email Integrations", "/admin", flash, &body, has_password)
+}
+
+// ── Telegram integrations page ────────────────────────────────────────────────
+
+pub fn admin_telegram_integrations(
+    accounts: &[&AccountConfig],
+    source_status: &[(String, bool)],
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let account_cards = if accounts.is_empty() {
+        "<p class=\"empty\">No Telegram bots configured.</p>".to_string()
+    } else {
+        accounts.iter().map(|a| integration_card(a, source_status, "/admin/integrations/telegram")).collect::<Vec<_>>().join("\n")
+    };
+
+    let add_form = r#"<div class="card" style="margin-top:8px">
+  <h2 style="margin-bottom:12px">Add Telegram bot</h2>
+  <p style="font-size:0.82rem;color:var(--muted);margin-bottom:14px">
+    Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>
+    and paste the token below.
+  </p>
+  <form method="post" action="/admin/integrations/telegram">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" name="name" required placeholder="e.g. deploy-bot">
+    </div>
+    <div class="form-group">
+      <label>Bot token</label>
+      <input type="text" name="token" required placeholder="123456:ABCdef…">
+    </div>
+    <div class="form-group">
+      <label>Poll interval (seconds)</label>
+      <input type="number" name="poll_interval_secs" value="30">
+    </div>
+    <button type="submit">Add bot</button>
+  </form>
+</div>"#;
 
     let body = format!(
-        r#"{stats}{action_btns}
-<div class="section-header"><h2>Email accounts ({email_count})</h2></div>
-{email_rows}
-<div class="section-header"><h2>Telegram bots ({tg_count})</h2></div>
-{telegram_rows}
-{add_account_form}"#,
-        stats = stats,
-        action_btns = action_btns,
-        email_count = email_accounts.len(),
-        email_rows = email_rows,
-        tg_count = telegram_accounts.len(),
-        telegram_rows = telegram_rows,
-        add_account_form = add_account_form,
+        r#"<div style="margin-bottom:12px"><a href="/admin">← Admin</a></div>
+<div class="section-header" style="margin-top:0">
+  <h2>Telegram bots ({count})</h2>
+</div>
+{account_cards}
+{add_form}"#,
+        count = accounts.len(),
+        account_cards = account_cards,
+        add_form = add_form,
     );
 
-    page("Admin", "/admin", flash, &body, has_password)
+    page("Telegram Integrations", "/admin", flash, &body, has_password)
+}
+
+/// Shared card used on both integration detail pages.
+fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &str) -> String {
+    let connected = source_status
+        .iter()
+        .find(|(n, _)| n.ends_with(&a.name))
+        .map(|(_, ok)| *ok)
+        .unwrap_or(false);
+    let dot = if connected { "dot-ok" } else { "dot-off" };
+    let status_text = if connected { "connected" } else { "offline" };
+    let enabled_badge = if a.enabled {
+        "<span class=\"badge badge-done\">enabled</span>"
+    } else {
+        "<span class=\"badge badge-off\">disabled</span>"
+    };
+    format!(
+        r#"<div class="card">
+  <div class="card-title"><span class="status-dot {dot}"></span>{name}</div>
+  <div class="card-meta">{atype} &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled} &nbsp;·&nbsp; poll every {poll}s</div>
+  <div class="actions">
+    <form class="inline" method="post" action="{base}/{name}/delete">
+      <button type="submit" class="danger">Remove</button>
+    </form>
+  </div>
+</div>"#,
+        dot = dot,
+        name = html_escape(&a.name),
+        atype = a.account_type,
+        status = status_text,
+        enabled = enabled_badge,
+        poll = a.poll_interval_secs,
+        base = base,
+    )
 }
 
 // ── Filters page ──────────────────────────────────────────────────────────────

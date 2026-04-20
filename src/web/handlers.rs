@@ -117,49 +117,63 @@ pub async fn admin_dashboard(
 ) -> Response {
     let cfg = state.config.read().unwrap();
     let (todo, done) = state.storage.counts();
-    let status = state.source_status.read().unwrap().clone();
+    let _status = state.source_status.read().unwrap().clone();
     let has_password = cfg.server.admin_password.is_some();
+    let email_count = cfg.accounts.iter()
+        .filter(|a| matches!(a.account_type, AccountType::Imap | AccountType::Pop3))
+        .count();
+    let telegram_count = cfg.accounts.iter()
+        .filter(|a| matches!(a.account_type, AccountType::Telegram))
+        .count();
     ok_html(ui::admin_dashboard(
-        &cfg.accounts,
-        &status,
         todo,
         done,
+        email_count,
+        telegram_count,
         has_password,
         q.flash.as_deref(),
     ))
 }
 
-// ── Admin – Accounts ──────────────────────────────────────────────────────────
+// ── Admin – Email integrations ────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-pub struct AddAccountForm {
+pub struct AddEmailForm {
     pub name: String,
-    pub account_type: String,
+    pub account_type: String,   // "imap" or "pop3"
     pub host: Option<String>,
     pub port: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
-    pub token: Option<String>,
     pub poll_interval_secs: Option<String>,
 }
 
-pub async fn add_account(
+pub async fn email_integrations_page(
     State(state): State<AppState>,
-    Form(form): Form<AddAccountForm>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
 ) -> Response {
-    let account_type = match form.account_type.to_lowercase().as_str() {
-        "pop3" => AccountType::Pop3,
-        "telegram" => AccountType::Telegram,
-        _ => AccountType::Imap,
-    };
+    let cfg = state.config.read().unwrap();
+    let has_password = cfg.server.admin_password.is_some();
+    let status = state.source_status.read().unwrap().clone();
+    let accounts: Vec<_> = cfg.accounts.iter()
+        .filter(|a| matches!(a.account_type, AccountType::Imap | AccountType::Pop3))
+        .collect();
+    ok_html(ui::admin_email_integrations(&accounts, &status, has_password, q.flash.as_deref()))
+}
 
+pub async fn add_email_integration(
+    State(state): State<AppState>,
+    Form(form): Form<AddEmailForm>,
+) -> Response {
+    let account_type = if form.account_type.to_lowercase() == "pop3" {
+        AccountType::Pop3
+    } else {
+        AccountType::Imap
+    };
     let port = form.port.as_deref().and_then(|p| p.parse::<u16>().ok());
-    let poll = form
-        .poll_interval_secs
-        .as_deref()
+    let poll = form.poll_interval_secs.as_deref()
         .and_then(|p| p.parse::<u64>().ok())
         .unwrap_or(60);
-
     let account = AccountConfig {
         name: form.name.trim().to_string(),
         account_type,
@@ -168,37 +182,101 @@ pub async fn add_account(
         username: nonempty(form.username),
         password: nonempty(form.password),
         tls: true,
-        token: nonempty(form.token),
+        token: None,
         enabled: true,
         poll_interval_secs: poll,
     };
-
     {
         let mut cfg = state.config.write().unwrap();
         cfg.accounts.push(account);
         if let Err(e) = cfg.save(&state.config_path) {
-            return flash_redirect("/admin", &format!("ERR:save failed: {}", e));
+            return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
         }
     }
-    flash_redirect("/admin", "Account added. Restart troop to activate polling.")
+    flash_redirect("/admin/integrations/email", "Email account added. Restart troop to activate polling.")
 }
 
-pub async fn delete_account(
+pub async fn delete_email_integration(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
+    let mut cfg = state.config.write().unwrap();
+    let before = cfg.accounts.len();
+    cfg.accounts.retain(|a| a.name != name);
+    if cfg.accounts.len() == before {
+        return flash_redirect("/admin/integrations/email", &format!("ERR:Account '{}' not found.", name));
+    }
+    if let Err(e) = cfg.save(&state.config_path) {
+        return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
+    }
+    flash_redirect("/admin/integrations/email", &format!("'{}' removed.", name))
+}
+
+// ── Admin – Telegram integrations ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct AddTelegramForm {
+    pub name: String,
+    pub token: String,
+    pub poll_interval_secs: Option<String>,
+}
+
+pub async fn telegram_integrations_page(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    let cfg = state.config.read().unwrap();
+    let has_password = cfg.server.admin_password.is_some();
+    let status = state.source_status.read().unwrap().clone();
+    let accounts: Vec<_> = cfg.accounts.iter()
+        .filter(|a| matches!(a.account_type, AccountType::Telegram))
+        .collect();
+    ok_html(ui::admin_telegram_integrations(&accounts, &status, has_password, q.flash.as_deref()))
+}
+
+pub async fn add_telegram_integration(
+    State(state): State<AppState>,
+    Form(form): Form<AddTelegramForm>,
+) -> Response {
+    let poll = form.poll_interval_secs.as_deref()
+        .and_then(|p| p.parse::<u64>().ok())
+        .unwrap_or(30);
+    let account = AccountConfig {
+        name: form.name.trim().to_string(),
+        account_type: AccountType::Telegram,
+        host: None,
+        port: None,
+        username: None,
+        password: None,
+        tls: false,
+        token: nonempty(Some(form.token)),
+        enabled: true,
+        poll_interval_secs: poll,
+    };
     {
         let mut cfg = state.config.write().unwrap();
-        let before = cfg.accounts.len();
-        cfg.accounts.retain(|a| a.name != name);
-        if cfg.accounts.len() == before {
-            return flash_redirect("/admin", &format!("ERR:Account '{}' not found.", name));
-        }
+        cfg.accounts.push(account);
         if let Err(e) = cfg.save(&state.config_path) {
-            return flash_redirect("/admin", &format!("ERR:save failed: {}", e));
+            return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
         }
     }
-    flash_redirect("/admin", &format!("Account '{}' removed.", name))
+    flash_redirect("/admin/integrations/telegram", "Telegram bot added. Restart troop to activate polling.")
+}
+
+pub async fn delete_telegram_integration(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let mut cfg = state.config.write().unwrap();
+    let before = cfg.accounts.len();
+    cfg.accounts.retain(|a| a.name != name);
+    if cfg.accounts.len() == before {
+        return flash_redirect("/admin/integrations/telegram", &format!("ERR:Bot '{}' not found.", name));
+    }
+    if let Err(e) = cfg.save(&state.config_path) {
+        return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
+    }
+    flash_redirect("/admin/integrations/telegram", &format!("'{}' removed.", name))
 }
 
 // ── Admin – Filters ───────────────────────────────────────────────────────────
