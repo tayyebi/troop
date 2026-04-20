@@ -1,18 +1,19 @@
+use crate::config::AccountConfig;
 use crate::storage::Task;
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 
 const CSS: &str = r#"
 :root {
-  --bg: #f5f5f5;
+  --bg: #f7f7f7;
   --card: #fff;
-  --accent: #2563eb;
-  --accent-dark: #1d4ed8;
-  --danger: #dc2626;
+  --accent: #111;
+  --accent-hover: #333;
+  --danger: #b91c1c;
   --muted: #6b7280;
   --border: #e5e7eb;
-  --radius: 8px;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --radius: 4px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -20,14 +21,14 @@ body {
   background: var(--bg);
   color: #111;
   min-height: 100vh;
-  max-width: 480px;
+  max-width: 520px;
   margin: 0 auto;
   padding: 0 0 env(safe-area-inset-bottom, 0);
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 header {
-  background: var(--accent);
+  background: #111;
   color: #fff;
   padding: 12px 16px;
   display: flex;
@@ -38,81 +39,169 @@ header {
   z-index: 100;
 }
 header a { color: #fff; font-weight: 600; }
-nav { display: flex; gap: 12px; font-size: 0.875rem; }
-nav a { color: rgba(255,255,255,0.85); }
-nav a.active { color: #fff; font-weight: 700; }
-main { padding: 16px; }
-h1 { font-size: 1.25rem; font-weight: 700; margin-bottom: 16px; }
-h2 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+nav { display: flex; gap: 14px; font-size: 0.84rem; align-items: center; }
+nav a { color: rgba(255,255,255,0.55); }
+nav a.active { color: #fff; font-weight: 600; }
+main { padding: 20px 16px; }
+h1 { font-size: 1.12rem; font-weight: 700; margin-bottom: 18px; letter-spacing: -0.01em; }
+h2 {
+  font-size: 0.71rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
 .card {
   background: var(--card);
   border-radius: var(--radius);
   border: 1px solid var(--border);
   padding: 14px 16px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
-.card-title { font-weight: 600; font-size: 1rem; margin-bottom: 4px; }
-.card-meta { font-size: 0.78rem; color: var(--muted); }
+.card-title { font-weight: 600; font-size: 0.92rem; margin-bottom: 3px; }
+.card-meta { font-size: 0.76rem; color: var(--muted); line-height: 1.6; }
 .badge {
   display: inline-block;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.67rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
-.badge-todo { background: #fef3c7; color: #92400e; }
-.badge-done { background: #d1fae5; color: #065f46; }
-.actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.badge-todo { background: #fef9c3; color: #854d0e; }
+.badge-done { background: #dcfce7; color: #166534; }
+.badge-off  { background: #f3f4f6; color: var(--muted); }
+.actions { display: flex; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
 form.inline { display: inline; }
 button, .btn {
   display: inline-block;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: 0.875rem;
+  padding: 7px 13px;
+  border-radius: var(--radius);
+  font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
-  border: none;
-  background: var(--accent);
+  border: 1px solid #111;
+  background: #111;
   color: #fff;
-  transition: background 0.15s;
+  transition: background 0.1s, border-color 0.1s;
+  font-family: var(--font);
+  text-decoration: none;
 }
-button:hover, .btn:hover { background: var(--accent-dark); }
-button.danger { background: var(--danger); }
-button.danger:hover { background: #b91c1c; }
-button.secondary { background: #fff; color: var(--accent); border: 1px solid var(--border); }
+button:hover, .btn:hover { background: #333; border-color: #333; text-decoration: none; }
+button.danger { background: #fff; color: var(--danger); border-color: #fca5a5; }
+button.danger:hover { background: #fef2f2; }
+button.secondary { background: #fff; color: #111; border-color: var(--border); }
 button.secondary:hover { background: var(--bg); }
-.form-group { margin-bottom: 14px; }
-label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 5px; }
+button.ghost {
+  background: transparent;
+  color: rgba(255,255,255,0.6);
+  border-color: rgba(255,255,255,0.25);
+  font-size: 0.78rem;
+  padding: 4px 9px;
+}
+button.ghost:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.form-group { margin-bottom: 12px; }
+label { display: block; font-size: 0.82rem; font-weight: 500; margin-bottom: 4px; color: #374151; }
 input[type=text], input[type=password], input[type=number], select, textarea {
   width: 100%;
-  padding: 9px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.9rem;
+  border-radius: var(--radius);
+  font-size: 0.88rem;
   font-family: var(--font);
   background: #fff;
+  color: #111;
+  transition: border-color 0.1s;
 }
-input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: #111; }
 textarea { min-height: 80px; resize: vertical; }
-.empty { color: var(--muted); font-size: 0.9rem; text-align: center; padding: 32px 0; }
-.flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 14px; font-size: 0.875rem; }
-.flash-ok  { background: #d1fae5; color: #065f46; }
-.flash-err { background: #fee2e2; color: #991b1b; }
-.status-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
+.empty { color: var(--muted); font-size: 0.88rem; text-align: center; padding: 32px 0; }
+.flash {
+  padding: 9px 13px;
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  font-size: 0.82rem;
+  border: 1px solid;
 }
-.dot-ok  { background: #22c55e; }
-.dot-off { background: #94a3b8; }
-.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.id-chip { font-family: monospace; font-size: 0.78rem; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; color: var(--muted); }
-pre { background: #f3f4f6; padding: 12px; border-radius: 6px; font-size: 0.82rem; overflow-x: auto; white-space: pre-wrap; }
+.flash-ok  { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+.flash-err { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+.status-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.dot-ok  { background: #4ade80; }
+.dot-off { background: #d1d5db; }
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  margin-top: 22px;
+}
+.section-header:first-of-type { margin-top: 0; }
+.id-chip {
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 0.71rem;
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--muted);
+}
+pre {
+  background: #f9fafb;
+  padding: 12px;
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  border: 1px solid var(--border);
+}
+.divider { height: 1px; background: var(--border); margin: 20px 0; }
+.stat-grid {
+  display: flex;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 22px;
+}
+.stat-cell { flex: 1; background: #fff; padding: 14px 10px; text-align: center; }
+.stat-num { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+.stat-label { font-size: 0.71rem; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+.login-wrap { display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 52px); padding: 20px 16px; }
+.login-card { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 24px; width: 100%; }
+.login-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.login-sub { font-size: 0.82rem; color: var(--muted); margin-bottom: 22px; }
+.cmd-table { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.cmd-row { display: flex; gap: 12px; align-items: baseline; background: #fff; padding: 9px 12px; }
+.cmd-code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.78rem; white-space: nowrap; color: #111; flex-shrink: 0; }
+.cmd-desc { font-size: 0.82rem; color: var(--muted); }
+code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.83em; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+.nav-card {
+  display: block;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+.nav-card:hover { border-color: #aaa; text-decoration: none; }
+.nav-card-title { font-weight: 600; font-size: 0.92rem; margin-bottom: 2px; }
+.nav-card-sub { font-size: 0.78rem; color: var(--muted); }
 "#;
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
 
-pub fn page(title: &str, active: &str, flash: Option<&str>, body: &str) -> String {
+/// Render a full page shell.  `logout` adds a Logout button to the nav when true.
+fn page(title: &str, active: &str, flash: Option<&str>, body: &str, logout: bool) -> String {
     let flash_html = match flash {
         Some(msg) if msg.starts_with("ERR:") => {
             format!("<div class=\"flash flash-err\">{}</div>", html_escape(&msg[4..]))
@@ -126,6 +215,14 @@ pub fn page(title: &str, active: &str, flash: Option<&str>, body: &str) -> Strin
         format!("<a href=\"{}\"{}>{}</a>", href, cls, label)
     };
 
+    let logout_btn = if logout {
+        r#"<form class="inline" method="post" action="/logout">
+  <button type="submit" class="ghost">Sign out</button>
+</form>"#
+    } else {
+        ""
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -137,10 +234,11 @@ pub fn page(title: &str, active: &str, flash: Option<&str>, body: &str) -> Strin
 </head>
 <body>
 <header>
-  <a href="/tasks">📋 troop</a>
+  <a href="/tasks">troop</a>
   <nav>
     {nav_tasks}
     {nav_admin}
+    {logout_btn}
   </nav>
 </header>
 <main>
@@ -154,53 +252,179 @@ pub fn page(title: &str, active: &str, flash: Option<&str>, body: &str) -> Strin
         body = body,
         nav_tasks = nav_link("/tasks", "Tasks"),
         nav_admin = nav_link("/admin", "Admin"),
+        logout_btn = logout_btn,
     )
+}
+
+// ── Login page ────────────────────────────────────────────────────────────────
+
+pub fn login_page(flash: Option<&str>) -> String {
+    let flash_html = match flash {
+        Some(msg) if msg.starts_with("ERR:") => {
+            format!("<div class=\"flash flash-err\">{}</div>", html_escape(&msg[4..]))
+        }
+        Some(msg) => format!("<div class=\"flash flash-ok\">{}</div>", html_escape(msg)),
+        None => String::new(),
+    };
+
+    let body = format!(
+        r#"<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-title">Sign in to troop</div>
+    <div class="login-sub">Admin password required</div>
+    {flash_html}
+    <form method="post" action="/login">
+      <div class="form-group">
+        <label for="pw">Password</label>
+        <input type="password" id="pw" name="password" required autofocus>
+      </div>
+      <button type="submit" style="width:100%">Sign in</button>
+    </form>
+  </div>
+</div>"#,
+        flash_html = flash_html,
+    );
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in – troop</title>
+<style>{CSS}</style>
+</head>
+<body>
+<header><a href="/tasks">troop</a></header>
+{body}
+</body>
+</html>"#,
+        CSS = CSS,
+        body = body,
+    )
+}
+
+// ── Change-password page ──────────────────────────────────────────────────────
+
+pub fn change_password_page(has_current_password: bool, flash: Option<&str>) -> String {
+    let current_field = if has_current_password {
+        r#"<div class="form-group">
+        <label for="cur">Current password</label>
+        <input type="password" id="cur" name="current_password" required>
+      </div>"#
+    } else {
+        r#"<input type="hidden" name="current_password" value="">"#
+    };
+
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin">← Admin</a></div>
+<div class="card">
+  <h1>Change Password</h1>
+  <form method="post" action="/admin/password">
+    {current_field}
+    <div class="form-group">
+      <label for="np">New password</label>
+      <input type="password" id="np" name="new_password" required>
+    </div>
+    <div class="form-group">
+      <label for="cp">Confirm new password</label>
+      <input type="password" id="cp" name="confirm_password" required>
+    </div>
+    <button type="submit">Update password</button>
+  </form>
+</div>"#,
+        current_field = current_field,
+    );
+
+    page("Change Password", "/admin", flash, &body, true)
 }
 
 // ── Task list ─────────────────────────────────────────────────────────────────
 
 pub fn task_list(todo: &[Task], done: &[Task], flash: Option<&str>) -> String {
-    let add_form = r#"<div class="card" style="margin-bottom:18px">
-  <h2 style="margin-bottom:10px">New Task</h2>
-  <form method="post" action="/tasks">
-    <div class="form-group">
-      <label for="title">Title</label>
-      <input type="text" id="title" name="title" required placeholder="Task title…">
+    let docs = r#"<div class="card" style="margin-bottom:18px">
+  <h2 style="margin-bottom:12px">How to create tasks via email</h2>
+  <p style="font-size:0.88rem;color:var(--muted);margin-bottom:14px">
+    Send an email to your configured IMAP or POP3 account.
+    troop polls the inbox on its configured interval and turns messages into tasks.
+    Commands are read from the <strong>subject line</strong> or the
+    <strong>first non-empty line of the body</strong>, prefixed with <code>TROOP</code>.
+  </p>
+
+  <h2 style="margin-bottom:8px">Commands</h2>
+  <div class="cmd-table">
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP add &lt;title&gt;</code>
+      <span class="cmd-desc">Create a new task. The email body becomes the description.</span>
     </div>
-    <div class="form-group">
-      <label for="desc">Description (optional)</label>
-      <textarea id="desc" name="description" placeholder="Details…"></textarea>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP list</code>
+      <span class="cmd-desc">Reply with all pending task IDs and titles.</span>
     </div>
-    <button type="submit">Add Task</button>
-  </form>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP status</code>
+      <span class="cmd-desc">Reply with pending and done counts.</span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP done &lt;id&gt;</code>
+      <span class="cmd-desc">Mark the task with the given ID as done.</span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code">TROOP show &lt;id&gt;</code>
+      <span class="cmd-desc">Reply with the full detail of a task.</span>
+    </div>
+  </div>
+
+  <h2 style="margin-top:16px;margin-bottom:8px">Example emails</h2>
+  <pre>Subject: TROOP add Buy groceries
+Body:    Milk, eggs, bread — check the list on the fridge.</pre>
+  <pre style="margin-top:8px">Subject: TROOP done a1b2c3d4</pre>
+  <pre style="margin-top:8px">Subject: TROOP list</pre>
+
+  <h2 style="margin-top:16px;margin-bottom:8px">Minimal config (<code>troop.toml</code>)</h2>
+  <pre>[[accounts]]
+name     = "work-email"
+type     = "imap"
+host     = "imap.example.com"
+port     = 993
+username = "you@example.com"
+password = "app-password"
+tls      = true
+poll_interval_secs = 60</pre>
+
+  <p style="font-size:0.82rem;color:var(--muted);margin-top:12px">
+    Restrict which senders are trusted under
+    <a href="/admin/filters">Admin → Filters</a>.
+    Add or remove accounts under <a href="/admin">Admin</a>.
+  </p>
 </div>"#;
 
     let todo_cards = if todo.is_empty() {
-        "<p class=\"empty\">No pending tasks 🎉</p>".to_string()
+        "<p class=\"empty\">No pending tasks.</p>".to_string()
     } else {
-        todo.iter().map(|t| task_card(t)).collect::<Vec<_>>().join("\n")
+        todo.iter().map(task_card).collect::<Vec<_>>().join("\n")
     };
 
     let done_cards = if done.is_empty() {
         "<p class=\"empty\">Nothing completed yet.</p>".to_string()
     } else {
-        done.iter().map(|t| task_card(t)).collect::<Vec<_>>().join("\n")
+        done.iter().map(task_card).collect::<Vec<_>>().join("\n")
     };
 
     let body = format!(
-        r#"{add_form}
+        r#"{docs}
 <div class="section-header"><h2>Pending ({todo_count})</h2></div>
 {todo_cards}
-<div class="section-header" style="margin-top:20px"><h2>Done ({done_count})</h2></div>
+<div class="section-header"><h2>Done ({done_count})</h2></div>
 {done_cards}"#,
-        add_form = add_form,
+        docs = docs,
         todo_count = todo.len(),
         todo_cards = todo_cards,
         done_count = done.len(),
         done_cards = done_cards,
     );
 
-    page("Tasks", "/tasks", flash, &body)
+    page("Tasks", "/tasks", flash, &body, false)
 }
 
 fn task_card(t: &Task) -> String {
@@ -220,7 +444,7 @@ fn task_card(t: &Task) -> String {
     } else {
         format!(
             r#"<form class="inline" method="post" action="/tasks/{id}/done">
-  <button type="submit">✓ Done</button>
+  <button type="submit">Mark done</button>
 </form>
 <form class="inline" method="post" action="/tasks/{id}/delete">
   <button type="submit" class="danger">Delete</button>
@@ -267,19 +491,19 @@ pub fn task_detail(t: &Task, flash: Option<&str>) -> String {
     } else {
         format!(
             r#"<form class="inline" method="post" action="/tasks/{id}/done">
-  <button type="submit">✓ Mark Done</button>
+  <button type="submit">Mark done</button>
 </form>"#,
             id = t.id
         )
     };
 
     let body = format!(
-        r#"<div style="margin-bottom:8px"><a href="/tasks">← Back</a></div>
+        r#"<div style="margin-bottom:10px"><a href="/tasks">← Tasks</a></div>
 <div class="card">
   <h1>{title}</h1>
   <div class="card-meta" style="margin:8px 0">{status_badge}
     &nbsp;<span class="id-chip">{id}</span>
-    &nbsp;created {created}
+    &nbsp;{created}
   </div>
   <div class="card-meta" style="margin-bottom:12px">from: {from} &nbsp;·&nbsp; source: {source}</div>
   {desc_html}
@@ -300,91 +524,85 @@ pub fn task_detail(t: &Task, flash: Option<&str>) -> String {
         done_btn = done_btn,
     );
 
-    page(&t.title, "/tasks", flash, &body)
+    page(&t.title, "/tasks", flash, &body, false)
 }
 
 // ── Admin dashboard ───────────────────────────────────────────────────────────
 
 pub fn admin_dashboard(
-    accounts: &[crate::config::AccountConfig],
-    source_status: &[(String, bool)],
     todo_count: usize,
     done_count: usize,
+    email_count: usize,
+    telegram_count: usize,
+    has_password: bool,
     flash: Option<&str>,
 ) -> String {
     let stats = format!(
-        r#"<div class="card" style="margin-bottom:18px">
-  <div style="display:flex;gap:24px;text-align:center">
-    <div style="flex:1"><div style="font-size:2rem;font-weight:700">{todo}</div><div class="card-meta">Pending</div></div>
-    <div style="flex:1"><div style="font-size:2rem;font-weight:700">{done}</div><div class="card-meta">Done</div></div>
-    <div style="flex:1"><div style="font-size:2rem;font-weight:700">{total}</div><div class="card-meta">Total</div></div>
-  </div>
+        r#"<div class="stat-grid">
+  <div class="stat-cell"><div class="stat-num">{todo}</div><div class="stat-label">Pending</div></div>
+  <div class="stat-cell"><div class="stat-num">{done}</div><div class="stat-label">Done</div></div>
+  <div class="stat-cell"><div class="stat-num">{total}</div><div class="stat-label">Total</div></div>
 </div>"#,
         todo = todo_count,
         done = done_count,
         total = todo_count + done_count,
     );
 
-    let account_rows = if accounts.is_empty() {
-        "<p class=\"empty\">No accounts configured.</p>".to_string()
-    } else {
-        accounts
-            .iter()
-            .map(|a| {
-                let connected = source_status
-                    .iter()
-                    .find(|(n, _)| n.ends_with(&a.name))
-                    .map(|(_, ok)| *ok)
-                    .unwrap_or(false);
-                let dot = if connected { "dot-ok" } else { "dot-off" };
-                let status_text = if connected { "connected" } else { "offline" };
-                let enabled_badge = if a.enabled {
-                    "<span class=\"badge badge-done\">enabled</span>"
-                } else {
-                    "<span class=\"badge\" style=\"background:#f3f4f6;color:var(--muted)\">disabled</span>"
-                };
-                format!(
-                    r#"<div class="card">
-  <div class="card-title"><span class="status-dot {dot}"></span>{name}</div>
-  <div class="card-meta">{atype} &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled}
-    &nbsp;·&nbsp; poll every {poll}s</div>
-  <div class="actions">
-    <form class="inline" method="post" action="/admin/accounts/{name}/delete">
-      <button type="submit" class="danger">Remove</button>
-    </form>
-  </div>
+    let body = format!(
+        r#"{stats}
+<h2 style="margin-bottom:10px">Integrations</h2>
+<a href="/admin/integrations/email" class="nav-card">
+  <div class="nav-card-title">Email <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{email_count}</span></div>
+  <div class="nav-card-sub">IMAP and POP3 accounts</div>
+</a>
+<a href="/admin/integrations/telegram" class="nav-card">
+  <div class="nav-card-title">Telegram <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{tg_count}</span></div>
+  <div class="nav-card-sub">Telegram bots</div>
+</a>
+<div class="divider"></div>
+<div style="display:flex;gap:7px;flex-wrap:wrap">
+  <a href="/admin/filters" class="btn secondary">Filters</a>
+  <a href="/admin/password" class="btn secondary">Change password</a>
 </div>"#,
-                    dot = dot,
-                    name = html_escape(&a.name),
-                    atype = a.account_type,
-                    status = status_text,
-                    enabled = enabled_badge,
-                    poll = a.poll_interval_secs,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        stats = stats,
+        email_count = email_count,
+        tg_count = telegram_count,
+    );
+
+    page("Admin", "/admin", flash, &body, has_password)
+}
+
+// ── Email integrations page ───────────────────────────────────────────────────
+
+pub fn admin_email_integrations(
+    accounts: &[&AccountConfig],
+    source_status: &[(String, bool)],
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let account_cards = if accounts.is_empty() {
+        "<p class=\"empty\">No email accounts configured.</p>".to_string()
+    } else {
+        accounts.iter().map(|a| integration_card(a, source_status, "/admin/integrations/email")).collect::<Vec<_>>().join("\n")
     };
 
-    // Add account form
-    let add_account_form = r#"<div class="card" style="margin-top:16px">
-  <h2 style="margin-bottom:10px">Add Account</h2>
-  <form method="post" action="/admin/accounts">
+    let add_form = r#"<div class="card" style="margin-top:8px">
+  <h2 style="margin-bottom:12px">Add email account</h2>
+  <form method="post" action="/admin/integrations/email">
     <div class="form-group">
       <label>Name</label>
-      <input type="text" name="name" required placeholder="e.g. main-email">
+      <input type="text" name="name" required placeholder="e.g. work-email">
     </div>
     <div class="form-group">
-      <label>Type</label>
+      <label>Protocol</label>
       <select name="account_type">
         <option value="imap">IMAP</option>
         <option value="pop3">POP3</option>
-        <option value="telegram">Telegram</option>
       </select>
     </div>
     <div class="form-group">
-      <label>Host (IMAP/POP3)</label>
-      <input type="text" name="host" placeholder="imap.example.com">
+      <label>Host</label>
+      <input type="text" name="host" required placeholder="imap.example.com">
     </div>
     <div class="form-group">
       <label>Port</label>
@@ -392,41 +610,128 @@ pub fn admin_dashboard(
     </div>
     <div class="form-group">
       <label>Username</label>
-      <input type="text" name="username" placeholder="user@example.com">
+      <input type="text" name="username" required placeholder="you@example.com">
     </div>
     <div class="form-group">
       <label>Password</label>
-      <input type="password" name="password">
-    </div>
-    <div class="form-group">
-      <label>Bot Token (Telegram only)</label>
-      <input type="text" name="token" placeholder="123456:ABC...">
+      <input type="password" name="password" required>
     </div>
     <div class="form-group">
       <label>Poll interval (seconds)</label>
       <input type="number" name="poll_interval_secs" value="60">
     </div>
-    <button type="submit">Add Account</button>
+    <button type="submit">Add account</button>
   </form>
 </div>"#;
 
     let body = format!(
-        r#"{stats}
-<div class="section-header"><h2>Accounts ({count})</h2><a href="/admin/filters" class="btn" style="font-size:0.8rem;padding:6px 10px">Filters</a></div>
-{account_rows}
-{add_account_form}"#,
-        stats = stats,
+        r#"<div style="margin-bottom:12px"><a href="/admin">← Admin</a></div>
+<div class="section-header" style="margin-top:0">
+  <h2>Email accounts ({count})</h2>
+</div>
+{account_cards}
+{add_form}"#,
         count = accounts.len(),
-        account_rows = account_rows,
-        add_account_form = add_account_form,
+        account_cards = account_cards,
+        add_form = add_form,
     );
 
-    page("Admin", "/admin", flash, &body)
+    page("Email Integrations", "/admin", flash, &body, has_password)
+}
+
+// ── Telegram integrations page ────────────────────────────────────────────────
+
+pub fn admin_telegram_integrations(
+    accounts: &[&AccountConfig],
+    source_status: &[(String, bool)],
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let account_cards = if accounts.is_empty() {
+        "<p class=\"empty\">No Telegram bots configured.</p>".to_string()
+    } else {
+        accounts.iter().map(|a| integration_card(a, source_status, "/admin/integrations/telegram")).collect::<Vec<_>>().join("\n")
+    };
+
+    let add_form = r#"<div class="card" style="margin-top:8px">
+  <h2 style="margin-bottom:12px">Add Telegram bot</h2>
+  <p style="font-size:0.82rem;color:var(--muted);margin-bottom:14px">
+    Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>
+    and paste the token below.
+  </p>
+  <form method="post" action="/admin/integrations/telegram">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" name="name" required placeholder="e.g. deploy-bot">
+    </div>
+    <div class="form-group">
+      <label>Bot token</label>
+      <input type="text" name="token" required placeholder="123456:ABCdef…">
+    </div>
+    <div class="form-group">
+      <label>Poll interval (seconds)</label>
+      <input type="number" name="poll_interval_secs" value="30">
+    </div>
+    <button type="submit">Add bot</button>
+  </form>
+</div>"#;
+
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin">← Admin</a></div>
+<div class="section-header" style="margin-top:0">
+  <h2>Telegram bots ({count})</h2>
+</div>
+{account_cards}
+{add_form}"#,
+        count = accounts.len(),
+        account_cards = account_cards,
+        add_form = add_form,
+    );
+
+    page("Telegram Integrations", "/admin", flash, &body, has_password)
+}
+
+/// Shared card used on both integration detail pages.
+fn integration_card(a: &AccountConfig, source_status: &[(String, bool)], base: &str) -> String {
+    let connected = source_status
+        .iter()
+        .find(|(n, _)| n.ends_with(&a.name))
+        .map(|(_, ok)| *ok)
+        .unwrap_or(false);
+    let dot = if connected { "dot-ok" } else { "dot-off" };
+    let status_text = if connected { "connected" } else { "offline" };
+    let enabled_badge = if a.enabled {
+        "<span class=\"badge badge-done\">enabled</span>"
+    } else {
+        "<span class=\"badge badge-off\">disabled</span>"
+    };
+    format!(
+        r#"<div class="card">
+  <div class="card-title"><span class="status-dot {dot}"></span>{name}</div>
+  <div class="card-meta">{atype} &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled} &nbsp;·&nbsp; poll every {poll}s</div>
+  <div class="actions">
+    <form class="inline" method="post" action="{base}/{name}/delete">
+      <button type="submit" class="danger">Remove</button>
+    </form>
+  </div>
+</div>"#,
+        dot = dot,
+        name = html_escape(&a.name),
+        atype = a.account_type,
+        status = status_text,
+        enabled = enabled_badge,
+        poll = a.poll_interval_secs,
+        base = base,
+    )
 }
 
 // ── Filters page ──────────────────────────────────────────────────────────────
 
-pub fn admin_filters(filters: &[crate::config::FilterConfig], flash: Option<&str>) -> String {
+pub fn admin_filters(
+    filters: &[crate::config::FilterConfig],
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
     let filter_cards = if filters.is_empty() {
         "<p class=\"empty\">No filters configured – all messages accepted.</p>".to_string()
     } else {
@@ -477,23 +782,23 @@ pub fn admin_filters(filters: &[crate::config::FilterConfig], flash: Option<&str
             .join("\n")
     };
 
-    let add_form = r#"<div class="card" style="margin-top:16px">
-  <h2 style="margin-bottom:10px">Add Filter</h2>
+    let add_form = r#"<div class="card" style="margin-top:8px">
+  <h2 style="margin-bottom:12px">Add Filter</h2>
   <form method="post" action="/admin/filters">
     <div class="form-group">
-      <label>Account name (optional, leave blank for all)</label>
-      <input type="text" name="account" placeholder="main-email">
+      <label>Account name <span style="color:var(--muted);font-weight:400">(optional – leave blank for all)</span></label>
+      <input type="text" name="account" placeholder="work-email">
     </div>
     <div class="form-group">
-      <label>Allowed from-addresses (comma-separated)</label>
+      <label>Allowed from-addresses <span style="color:var(--muted);font-weight:400">(comma-separated)</span></label>
       <input type="text" name="from_address" placeholder="boss@example.com, admin@example.com">
     </div>
     <div class="form-group">
-      <label>Subject must contain (comma-separated)</label>
+      <label>Subject must contain <span style="color:var(--muted);font-weight:400">(comma-separated)</span></label>
       <input type="text" name="subject_contains" placeholder="TROOP:, TODO:">
     </div>
     <div class="form-group">
-      <label>Body must contain (comma-separated)</label>
+      <label>Body must contain <span style="color:var(--muted);font-weight:400">(comma-separated)</span></label>
       <input type="text" name="body_contains" placeholder="secret-word">
     </div>
     <div class="form-group">
@@ -505,15 +810,19 @@ pub fn admin_filters(filters: &[crate::config::FilterConfig], flash: Option<&str
       <input type="text" name="header_value" placeholder="mysecret">
     </div>
     <div class="form-group">
-      <label><input type="checkbox" name="gpg_required" value="true"> Require GPG signature</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="gpg_required" value="true" style="width:auto">
+        Require GPG signature
+      </label>
     </div>
-    <button type="submit">Add Filter</button>
+    <button type="submit">Add filter</button>
   </form>
 </div>"#;
 
     let body = format!(
-        r#"<div class="section-header"><h2>Filters ({count})</h2>
-  <a href="/admin" class="btn" style="font-size:0.8rem;padding:6px 10px">← Admin</a>
+        r#"<div class="section-header" style="margin-top:0">
+  <h2>Filters ({count})</h2>
+  <a href="/admin" class="btn secondary" style="font-size:0.78rem;padding:5px 10px">← Admin</a>
 </div>
 {filter_cards}
 {add_form}"#,
@@ -522,7 +831,7 @@ pub fn admin_filters(filters: &[crate::config::FilterConfig], flash: Option<&str
         add_form = add_form,
     );
 
-    page("Filters", "/admin", flash, &body)
+    page("Filters", "/admin", flash, &body, has_password)
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -532,7 +841,8 @@ pub fn not_found() -> String {
         "Not Found",
         "",
         None,
-        "<div class=\"empty\"><p>Page not found.</p><p><a href=\"/tasks\">← Back to tasks</a></p></div>",
+        "<div class=\"empty\"><p>Page not found.</p><p style=\"margin-top:8px\"><a href=\"/tasks\">← Back to tasks</a></p></div>",
+        false,
     )
 }
 
