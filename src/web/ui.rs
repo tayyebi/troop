@@ -658,6 +658,18 @@ pub fn admin_email_integrations(
       <label>Poll interval (seconds)</label>
       <input type="number" name="poll_interval_secs" value="60">
     </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="tls" value="true" checked style="width:auto">
+        Use TLS (uncheck to ignore TLS / use plain connection)
+      </label>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="enabled" value="true" checked style="width:auto">
+        Enabled
+      </label>
+    </div>
     <button type="submit">Add account</button>
   </form>
 </div>"#;
@@ -710,6 +722,12 @@ pub fn admin_telegram_integrations(
       <label>Poll interval (seconds)</label>
       <input type="number" name="poll_interval_secs" value="30">
     </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="enabled" value="true" checked style="width:auto">
+        Enabled
+      </label>
+    </div>
     <button type="submit">Add bot</button>
   </form>
 </div>"#;
@@ -756,16 +774,18 @@ fn integration_card(a: &AccountConfig, source_status: &[SourceStatus], base: &st
   <div class="card-meta">{atype} &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled} &nbsp;·&nbsp; poll every {poll}s</div>
   {error_html}
   <div class="actions">
-    <form class="inline" method="post" action="{base}/{name}/poll">
+    <a href="{base}/{name_url}/edit" class="btn secondary">Edit</a>
+    <form class="inline" method="post" action="{base}/{name_url}/poll">
       <button type="submit" class="secondary">Poll now</button>
     </form>
-    <form class="inline" method="post" action="{base}/{name}/delete">
+    <form class="inline" method="post" action="{base}/{name_url}/delete">
       <button type="submit" class="danger">Remove</button>
     </form>
   </div>
 </div>"#,
         dot = dot,
         name = html_escape(&a.name),
+        name_url = urlencoding::encode(&a.name),
         atype = a.account_type,
         status = status_text,
         enabled = enabled_badge,
@@ -773,6 +793,141 @@ fn integration_card(a: &AccountConfig, source_status: &[SourceStatus], base: &st
         base = base,
         error_html = error_html,
     )
+}
+
+// ── Edit email integration page ───────────────────────────────────────────────
+
+pub fn admin_edit_email_integration(
+    a: &AccountConfig,
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let imap_selected = if matches!(a.account_type, crate::config::AccountType::Imap) {
+        " selected"
+    } else {
+        ""
+    };
+    let pop3_selected = if matches!(a.account_type, crate::config::AccountType::Pop3) {
+        " selected"
+    } else {
+        ""
+    };
+    let port_val = a.port.map(|p| p.to_string()).unwrap_or_default();
+    let host_val = a.host.as_deref().unwrap_or("");
+    let username_val = a.username.as_deref().unwrap_or("");
+    let poll_val = a.poll_interval_secs.to_string();
+    let tls_checked = if a.tls { " checked" } else { "" };
+    let enabled_checked = if a.enabled { " checked" } else { "" };
+    let name_url = urlencoding::encode(&a.name).to_string();
+
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin/integrations/email">← Email accounts</a></div>
+<div class="card">
+  <h1>Edit: {name}</h1>
+  <form method="post" action="/admin/integrations/email/{name_url}/edit">
+    <div class="form-group">
+      <label>Protocol</label>
+      <select name="account_type">
+        <option value="imap"{imap_selected}>IMAP</option>
+        <option value="pop3"{pop3_selected}>POP3</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Host</label>
+      <input type="text" name="host" value="{host}" placeholder="imap.example.com">
+    </div>
+    <div class="form-group">
+      <label>Port</label>
+      <input type="number" name="port" value="{port}" placeholder="993">
+    </div>
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" name="username" value="{username}" placeholder="you@example.com">
+    </div>
+    <div class="form-group">
+      <label>Password <span style="color:var(--muted);font-weight:400">(leave blank to keep existing)</span></label>
+      <input type="password" name="password" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label>Poll interval (seconds)</label>
+      <input type="number" name="poll_interval_secs" value="{poll}">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="tls" value="true"{tls_checked} style="width:auto">
+        Use TLS (uncheck to ignore TLS / use plain connection)
+      </label>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="enabled" value="true"{enabled_checked} style="width:auto">
+        Enabled
+      </label>
+    </div>
+    <div style="display:flex;gap:7px">
+      <button type="submit">Save changes</button>
+      <a href="/admin/integrations/email" class="btn secondary">Cancel</a>
+    </div>
+  </form>
+</div>"#,
+        name = html_escape(&a.name),
+        name_url = name_url,
+        imap_selected = imap_selected,
+        pop3_selected = pop3_selected,
+        host = html_escape(host_val),
+        port = html_escape(&port_val),
+        username = html_escape(username_val),
+        poll = html_escape(&poll_val),
+        tls_checked = tls_checked,
+        enabled_checked = enabled_checked,
+    );
+
+    page(&format!("Edit {}", &a.name), "/admin", flash, &body, has_password)
+}
+
+// ── Edit Telegram integration page ────────────────────────────────────────────
+
+pub fn admin_edit_telegram_integration(
+    a: &AccountConfig,
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let poll_val = a.poll_interval_secs.to_string();
+    let enabled_checked = if a.enabled { " checked" } else { "" };
+    let name_url = urlencoding::encode(&a.name).to_string();
+
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin/integrations/telegram">← Telegram bots</a></div>
+<div class="card">
+  <h1>Edit: {name}</h1>
+  <form method="post" action="/admin/integrations/telegram/{name_url}/edit">
+    <div class="form-group">
+      <label>Bot token <span style="color:var(--muted);font-weight:400">(leave blank to keep existing)</span></label>
+      <input type="text" name="token" autocomplete="off" placeholder="123456:ABCdef…">
+    </div>
+    <div class="form-group">
+      <label>Poll interval (seconds)</label>
+      <input type="number" name="poll_interval_secs" value="{poll}">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="enabled" value="true"{enabled_checked} style="width:auto">
+        Enabled
+      </label>
+    </div>
+    <div style="display:flex;gap:7px">
+      <button type="submit">Save changes</button>
+      <a href="/admin/integrations/telegram" class="btn secondary">Cancel</a>
+    </div>
+  </form>
+</div>"#,
+        name = html_escape(&a.name),
+        name_url = name_url,
+        poll = html_escape(&poll_val),
+        enabled_checked = enabled_checked,
+    );
+
+    page(&format!("Edit {}", &a.name), "/admin", flash, &body, has_password)
 }
 
 // ── Filters page ──────────────────────────────────────────────────────────────

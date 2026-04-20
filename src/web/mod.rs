@@ -108,6 +108,10 @@ pub fn build_router(state: AppState) -> Router {
             post(handlers::delete_email_integration),
         )
         .route(
+            "/admin/integrations/email/:name/edit",
+            get(handlers::edit_email_integration_page).post(handlers::update_email_integration),
+        )
+        .route(
             "/admin/integrations/email/:name/poll",
             post(handlers::poll_now),
         )
@@ -119,6 +123,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/admin/integrations/telegram/:name/delete",
             post(handlers::delete_telegram_integration),
+        )
+        .route(
+            "/admin/integrations/telegram/:name/edit",
+            get(handlers::edit_telegram_integration_page).post(handlers::update_telegram_integration),
         )
         .route(
             "/admin/integrations/telegram/:name/poll",
