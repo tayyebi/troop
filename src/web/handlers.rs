@@ -146,6 +146,23 @@ pub struct AddEmailForm {
     pub username: Option<String>,
     pub password: Option<String>,
     pub poll_interval_secs: Option<String>,
+    /// Checkbox: present means true, absent means false.
+    pub tls: Option<String>,
+    /// Checkbox: present means true, absent means false.
+    pub enabled: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct EditEmailForm {
+    pub account_type: String,
+    pub host: Option<String>,
+    pub port: Option<String>,
+    pub username: Option<String>,
+    /// Leave blank to keep the existing password unchanged.
+    pub password: Option<String>,
+    pub poll_interval_secs: Option<String>,
+    pub tls: Option<String>,
+    pub enabled: Option<String>,
 }
 
 pub async fn email_integrations_page(
@@ -174,6 +191,8 @@ pub async fn add_email_integration(
     let poll = form.poll_interval_secs.as_deref()
         .and_then(|p| p.parse::<u64>().ok())
         .unwrap_or(60);
+    let tls = form.tls.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
+    let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
     let account = AccountConfig {
         name: form.name.trim().to_string(),
         account_type,
@@ -181,9 +200,9 @@ pub async fn add_email_integration(
         port,
         username: nonempty(form.username),
         password: nonempty(form.password),
-        tls: true,
+        tls,
         token: None,
-        enabled: true,
+        enabled,
         poll_interval_secs: poll,
     };
     {
@@ -212,6 +231,60 @@ pub async fn delete_email_integration(
     flash_redirect("/admin/integrations/email", &format!("'{}' removed.", name))
 }
 
+pub async fn edit_email_integration_page(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    let cfg = state.config.read().unwrap();
+    let has_password = cfg.server.admin_password.is_some();
+    match cfg.accounts.iter().find(|a| a.name == name) {
+        Some(account) => ok_html(ui::admin_edit_email_integration(account, has_password, q.flash.as_deref())),
+        None => flash_redirect("/admin/integrations/email", &format!("ERR:Account '{}' not found.", name)),
+    }
+}
+
+pub async fn update_email_integration(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Form(form): Form<EditEmailForm>,
+) -> Response {
+    let account_type = if form.account_type.to_lowercase() == "pop3" {
+        AccountType::Pop3
+    } else {
+        AccountType::Imap
+    };
+    let port = form.port.as_deref().and_then(|p| p.parse::<u16>().ok());
+    let poll = form.poll_interval_secs.as_deref()
+        .and_then(|p| p.parse::<u64>().ok())
+        .unwrap_or(60);
+    let tls = form.tls.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
+    let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
+
+    let mut cfg = state.config.write().unwrap();
+    match cfg.accounts.iter_mut().find(|a| a.name == name) {
+        None => {
+            return flash_redirect("/admin/integrations/email", &format!("ERR:Account '{}' not found.", name));
+        }
+        Some(account) => {
+            account.account_type = account_type;
+            account.host = nonempty(form.host);
+            account.port = port;
+            account.username = nonempty(form.username);
+            if let Some(pw) = nonempty(form.password) {
+                account.password = Some(pw);
+            }
+            account.tls = tls;
+            account.enabled = enabled;
+            account.poll_interval_secs = poll;
+        }
+    }
+    if let Err(e) = cfg.save(&state.config_path) {
+        return flash_redirect("/admin/integrations/email", &format!("ERR:save failed: {}", e));
+    }
+    flash_redirect("/admin/integrations/email", &format!("'{}' updated. Restart troop to apply changes.", name))
+}
+
 // ── Admin – Telegram integrations ─────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -219,6 +292,14 @@ pub struct AddTelegramForm {
     pub name: String,
     pub token: String,
     pub poll_interval_secs: Option<String>,
+    pub enabled: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct EditTelegramForm {
+    pub token: Option<String>,
+    pub poll_interval_secs: Option<String>,
+    pub enabled: Option<String>,
 }
 
 pub async fn telegram_integrations_page(
@@ -241,6 +322,7 @@ pub async fn add_telegram_integration(
     let poll = form.poll_interval_secs.as_deref()
         .and_then(|p| p.parse::<u64>().ok())
         .unwrap_or(30);
+    let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
     let account = AccountConfig {
         name: form.name.trim().to_string(),
         account_type: AccountType::Telegram,
@@ -250,7 +332,7 @@ pub async fn add_telegram_integration(
         password: None,
         tls: false,
         token: nonempty(Some(form.token)),
-        enabled: true,
+        enabled,
         poll_interval_secs: poll,
     };
     {
@@ -277,6 +359,48 @@ pub async fn delete_telegram_integration(
         return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
     }
     flash_redirect("/admin/integrations/telegram", &format!("'{}' removed.", name))
+}
+
+pub async fn edit_telegram_integration_page(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    let cfg = state.config.read().unwrap();
+    let has_password = cfg.server.admin_password.is_some();
+    match cfg.accounts.iter().find(|a| a.name == name) {
+        Some(account) => ok_html(ui::admin_edit_telegram_integration(account, has_password, q.flash.as_deref())),
+        None => flash_redirect("/admin/integrations/telegram", &format!("ERR:Bot '{}' not found.", name)),
+    }
+}
+
+pub async fn update_telegram_integration(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Form(form): Form<EditTelegramForm>,
+) -> Response {
+    let poll = form.poll_interval_secs.as_deref()
+        .and_then(|p| p.parse::<u64>().ok())
+        .unwrap_or(30);
+    let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
+
+    let mut cfg = state.config.write().unwrap();
+    match cfg.accounts.iter_mut().find(|a| a.name == name) {
+        None => {
+            return flash_redirect("/admin/integrations/telegram", &format!("ERR:Bot '{}' not found.", name));
+        }
+        Some(account) => {
+            if let Some(tok) = nonempty(form.token) {
+                account.token = Some(tok);
+            }
+            account.enabled = enabled;
+            account.poll_interval_secs = poll;
+        }
+    }
+    if let Err(e) = cfg.save(&state.config_path) {
+        return flash_redirect("/admin/integrations/telegram", &format!("ERR:save failed: {}", e));
+    }
+    flash_redirect("/admin/integrations/telegram", &format!("'{}' updated. Restart troop to apply changes.", name))
 }
 
 // ── Admin – Manual poll trigger ───────────────────────────────────────────────
