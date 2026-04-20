@@ -8,8 +8,9 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use crate::commands;
-use crate::config::{AccountType, Config, FilterConfig};
+use crate::config::{AccountConfig, AccountType, Config, FilterConfig};
 use crate::filter;
+use crate::smtp;
 use crate::source::{imap::ImapSource, pop3::Pop3Source, telegram::TelegramSource, MessageSource};
 use crate::storage::Storage;
 
@@ -128,7 +129,7 @@ impl JobManager {
                 "Starting poller for '{}' every {}s",
                 name, account.poll_interval_secs
             );
-            self.spawn_poller(source, account.poll_interval_secs, config.filters.clone());
+            self.spawn_poller(source, account.clone(), config.filters.clone());
         }
     }
 
@@ -154,10 +155,11 @@ impl JobManager {
     pub fn spawn_poller(
         self: &Arc<Self>,
         source: Arc<dyn MessageSource>,
-        interval_secs: u64,
+        account_config: AccountConfig,
         filters: Vec<FilterConfig>,
     ) {
         let name = source.name().to_string();
+        let interval_secs = account_config.poll_interval_secs;
 
         // Create or reuse the trigger notifier for this source.
         let trigger = {
@@ -201,6 +203,7 @@ impl JobManager {
             run_poller(
                 source,
                 storage_clone,
+                account_config,
                 filters,
                 status_clone,
                 trigger,
@@ -263,12 +266,16 @@ impl JobManager {
 async fn run_poller(
     source: Arc<dyn MessageSource>,
     storage: Arc<Storage>,
+    account_config: AccountConfig,
     filters: Vec<FilterConfig>,
     status: Arc<RwLock<Vec<JobInfo>>>,
     trigger: Arc<Notify>,
     interval_secs: u64,
 ) {
     let name = source.name().to_string();
+    // Only email-protocol sources (imap/pop3) support SMTP replies.
+    let is_email_source = name.starts_with("imap:") || name.starts_with("pop3:");
+    let has_smtp = account_config.smtp_host.is_some();
     loop {
         // Arm the notification listener *before* blocking on the poll so that
         // any notify_one() fired while the poll is running is not missed when
@@ -309,7 +316,28 @@ async fn run_poller(
                     let cmd = commands::parse_command(&msg);
                     info!("[{}] command from '{}': {:?}", name, msg.from, cmd);
                     match commands::execute(&cmd, &msg, &storage) {
-                        Ok(reply) => info!("[{}] reply: {}", name, reply),
+                        Ok(reply) => {
+                            info!("[{}] reply: {}", name, reply);
+                            if is_email_source && has_smtp {
+                                let reply_subject = if msg.subject.is_empty() {
+                                    "Re: troop".to_string()
+                                } else if msg.subject.to_uppercase().starts_with("RE:") {
+                                    msg.subject.clone()
+                                } else {
+                                    format!("Re: {}", msg.subject)
+                                };
+                                if let Err(e) = smtp::send_reply(
+                                    &account_config,
+                                    &msg.from,
+                                    &reply_subject,
+                                    &reply,
+                                ) {
+                                    error!("[{}] failed to send reply to '{}': {}", name, msg.from, e);
+                                } else {
+                                    info!("[{}] reply sent to '{}'", name, msg.from);
+                                }
+                            }
+                        }
                         Err(e) => error!("[{}] command error: {}", name, e),
                     }
                 }

@@ -27,6 +27,15 @@ tls = true
 enabled = true
 poll_interval_secs = 60
 
+# SMTP settings for sending replies (optional)
+# When smtp_host is set troop will email a reply to the sender after each command.
+smtp_host = "smtp.example.com"
+smtp_port = 465
+smtp_username = "troop@example.com"
+smtp_password = "secret"
+smtp_tls = true          # true = implicit TLS (port 465), false = STARTTLS (port 587)
+reply_from = "troop@example.com"   # optional, defaults to smtp_username
+
 # POP3 account example (not yet implemented, shown for completeness)
 # [[accounts]]
 # name = "secondary-email"

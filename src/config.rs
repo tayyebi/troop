@@ -77,6 +77,16 @@ pub struct AccountConfig {
     pub enabled: bool,
     #[serde(default = "default_poll")]
     pub poll_interval_secs: u64,
+    // SMTP (for sending email replies)
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    #[serde(default = "default_true")]
+    pub smtp_tls: bool,
+    /// The From address used in outgoing reply emails.
+    /// Defaults to `username` when not set.
+    pub reply_from: Option<String>,
 }
 
 fn default_true() -> bool {

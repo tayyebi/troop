@@ -3,6 +3,7 @@ mod config;
 mod filter;
 mod jobs;
 mod message;
+mod smtp;
 mod source;
 mod storage;
 mod web;
