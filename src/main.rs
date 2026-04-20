@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
         config_path: config_path.clone(),
         storage: storage.clone(),
         source_status: source_status.clone(),
+        session_token: Arc::new(RwLock::new(uuid::Uuid::new_v4().to_string())),
     };
 
     // Spawn a background poller per source

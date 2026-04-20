@@ -1,6 +1,6 @@
 use axum::{
     extract::{Form, Path, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use chrono::Utc;
@@ -118,11 +118,13 @@ pub async fn admin_dashboard(
     let cfg = state.config.read().unwrap();
     let (todo, done) = state.storage.counts();
     let status = state.source_status.read().unwrap().clone();
+    let has_password = cfg.server.admin_password.is_some();
     ok_html(ui::admin_dashboard(
         &cfg.accounts,
         &status,
         todo,
         done,
+        has_password,
         q.flash.as_deref(),
     ))
 }
@@ -206,7 +208,8 @@ pub async fn filter_list(
     axum::extract::Query(q): axum::extract::Query<FlashQuery>,
 ) -> Response {
     let cfg = state.config.read().unwrap();
-    ok_html(ui::admin_filters(&cfg.filters, q.flash.as_deref()))
+    let has_password = cfg.server.admin_password.is_some();
+    ok_html(ui::admin_filters(&cfg.filters, has_password, q.flash.as_deref()))
 }
 
 #[derive(Deserialize)]
@@ -277,10 +280,127 @@ pub async fn fallback() -> Response {
     not_found_html()
 }
 
+// ── Auth – Login / Logout ─────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LoginForm {
+    pub password: String,
+}
+
+pub async fn login_page(
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    ok_html(ui::login_page(q.flash.as_deref()))
+}
+
+pub async fn do_login(
+    State(state): State<AppState>,
+    Form(form): Form<LoginForm>,
+) -> Response {
+    let expected = state.config.read().unwrap().server.admin_password.clone();
+    match expected {
+        None => {
+            // No password configured – go straight to admin.
+            Redirect::to("/admin").into_response()
+        }
+        Some(pw) => {
+            if form.password == pw {
+                let token = state.session_token.read().unwrap().clone();
+                let mut resp = Redirect::to("/admin").into_response();
+                resp.headers_mut().insert(
+                    header::SET_COOKIE,
+                    format!(
+                        "troop_session={}; Path=/; HttpOnly; SameSite=Strict",
+                        token
+                    )
+                    .parse()
+                    .unwrap(),
+                );
+                resp
+            } else {
+                flash_redirect("/login", "ERR:Incorrect password.")
+            }
+        }
+    }
+}
+
+pub async fn do_logout() -> Response {
+    let mut resp = Redirect::to("/login").into_response();
+    resp.headers_mut().insert(
+        header::SET_COOKIE,
+        "troop_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
+            .parse()
+            .unwrap(),
+    );
+    resp
+}
+
+// ── Admin – Change Password ───────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ChangePasswordForm {
+    pub current_password: String,
+    pub new_password: String,
+    pub confirm_password: String,
+}
+
+pub async fn change_password_page(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    let has_current = state.config.read().unwrap().server.admin_password.is_some();
+    ok_html(ui::change_password_page(has_current, q.flash.as_deref()))
+}
+
+pub async fn do_change_password(
+    State(state): State<AppState>,
+    Form(form): Form<ChangePasswordForm>,
+) -> Response {
+    if form.new_password != form.confirm_password {
+        return flash_redirect("/admin/password", "ERR:Passwords do not match.");
+    }
+    if form.new_password.is_empty() {
+        return flash_redirect("/admin/password", "ERR:New password cannot be empty.");
+    }
+
+    // Verify current password when one is already set.
+    let current_pw = state.config.read().unwrap().server.admin_password.clone();
+    if let Some(ref pw) = current_pw {
+        if form.current_password != *pw {
+            return flash_redirect("/admin/password", "ERR:Current password is incorrect.");
+        }
+    }
+
+    {
+        let mut cfg = state.config.write().unwrap();
+        cfg.server.admin_password = Some(form.new_password);
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/password", &format!("ERR:Save failed: {}", e));
+        }
+    }
+
+    // Regenerate session token so old sessions are invalidated.
+    let new_token = uuid::Uuid::new_v4().to_string();
+    *state.session_token.write().unwrap() = new_token.clone();
+
+    // Keep the user logged in with the new token.
+    let encoded = urlencoding::encode("Password updated.").to_string();
+    let mut resp = Redirect::to(&format!("/admin?flash={}", encoded)).into_response();
+    resp.headers_mut().insert(
+        header::SET_COOKIE,
+        format!(
+            "troop_session={}; Path=/; HttpOnly; SameSite=Strict",
+            new_token
+        )
+        .parse()
+        .unwrap(),
+    );
+    resp
+}
+
 // ── Utility ───────────────────────────────────────────────────────────────────
 
 fn nonempty(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.trim().is_empty())
 }
-
 
