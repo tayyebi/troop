@@ -48,12 +48,15 @@ reply_from = "troop@example.com"   # optional, defaults to smtp_username
 # enabled = false
 # poll_interval_secs = 120
 
-# Telegram bot example (stub – integration ready for future use)
+# Webhook endpoint example (Telegram-friendly, also accepts generic JSON or plain text)
+# After adding this account, set the webhook URL in Telegram:
+#   curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+#        --data-urlencode "url=https://your-server.com/webhook/replace-with-a-long-random-string"
 # [[accounts]]
-# name = "tg-bot"
-# type = "telegram"
-# token = "123456:ABC-DEF..."
-# enabled = false
+# name              = "tg-webhook"
+# type              = "webhook"
+# webhook_secret    = "replace-with-a-long-random-string"
+# enabled           = true
 # poll_interval_secs = 5
 
 # ── Filters ──────────────────────────────────────────────────────────────────

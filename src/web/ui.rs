@@ -572,6 +572,7 @@ pub fn admin_dashboard(
     done_count: usize,
     email_count: usize,
     telegram_count: usize,
+    webhook_count: usize,
     job_count: usize,
     has_password: bool,
     flash: Option<&str>,
@@ -596,7 +597,11 @@ pub fn admin_dashboard(
 </a>
 <a href="/admin/integrations/telegram" class="nav-card">
   <div class="nav-card-title">Telegram <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{tg_count}</span></div>
-  <div class="nav-card-sub">Telegram bots</div>
+  <div class="nav-card-sub">Telegram bots (long-polling)</div>
+</a>
+<a href="/admin/integrations/webhook" class="nav-card">
+  <div class="nav-card-title">Webhook <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{wh_count}</span></div>
+  <div class="nav-card-sub">Telegram bots and generic HTTP webhooks</div>
 </a>
 <a href="/admin/jobs" class="nav-card">
   <div class="nav-card-title">Jobs <span class="badge badge-off" style="font-size:0.67rem;vertical-align:middle">{job_count}</span></div>
@@ -610,6 +615,7 @@ pub fn admin_dashboard(
         stats = stats,
         email_count = email_count,
         tg_count = telegram_count,
+        wh_count = webhook_count,
         job_count = job_count,
     );
 
@@ -994,6 +1000,246 @@ pub fn admin_edit_telegram_integration(
 </div>"#,
         name = html_escape(&a.name),
         name_url = name_url,
+        poll = html_escape(&poll_val),
+        enabled_checked = enabled_checked,
+    );
+
+    page(&format!("Edit {}", &a.name), "/admin", flash, &body, has_password)
+}
+
+// ── Webhook integrations page ─────────────────────────────────────────────────
+
+pub fn admin_webhook_integrations(
+    accounts: &[&crate::config::AccountConfig],
+    jobs: &[JobInfo],
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let account_cards = if accounts.is_empty() {
+        "<p class=\"empty\">No webhook endpoints configured.</p>".to_string()
+    } else {
+        accounts
+            .iter()
+            .map(|a| webhook_integration_card(a, jobs))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let onboarding = r#"<div class="card" style="margin-bottom:18px">
+  <h2 style="margin-bottom:12px">What is a Webhook endpoint?</h2>
+  <p style="font-size:0.88rem;color:var(--muted);margin-bottom:12px">
+    A webhook endpoint is a public URL that external services can <strong>POST</strong> to.
+    troop accepts incoming messages and enqueues them for processing — no polling needed.
+    This is the recommended way to connect a <strong>Telegram bot</strong>.
+  </p>
+
+  <h2 style="margin-bottom:8px;margin-top:16px">How to connect a Telegram bot</h2>
+  <p style="font-size:0.88rem;color:var(--muted);margin-bottom:10px">
+    Follow these steps after you have added an endpoint below and noted the
+    <strong>webhook URL</strong> shown on its card.
+  </p>
+
+  <div class="cmd-table" style="margin-bottom:12px">
+    <div class="cmd-row">
+      <code class="cmd-code" style="min-width:22px;text-align:center">1</code>
+      <span class="cmd-desc">
+        Open Telegram and message <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>.
+        Use <code>/newbot</code> to create a new bot and copy the <strong>token</strong>
+        (format: <code>123456:ABC-DEF…</code>).
+      </span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code" style="min-width:22px;text-align:center">2</code>
+      <span class="cmd-desc">
+        Register the webhook URL with Telegram using <code>setWebhook</code>.
+        Replace <code>TOKEN</code> and <code>WEBHOOK_URL</code> with your values:
+      </span>
+    </div>
+  </div>
+  <pre>curl "https://api.telegram.org/botTOKEN/setWebhook" \
+     --data-urlencode "url=WEBHOOK_URL" \
+     --data "drop_pending_updates=true"</pre>
+
+  <div class="cmd-table" style="margin-top:12px;margin-bottom:12px">
+    <div class="cmd-row">
+      <code class="cmd-code" style="min-width:22px;text-align:center">3</code>
+      <span class="cmd-desc">
+        Telegram responds with <code>{"ok":true}</code>. Send a message to your bot —
+        troop will receive it and execute any <code>TROOP</code> command.
+      </span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code" style="min-width:22px;text-align:center">4</code>
+      <span class="cmd-desc">
+        To verify the webhook is set: <code>curl "https://api.telegram.org/botTOKEN/getWebhookInfo"</code>
+      </span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code" style="min-width:22px;text-align:center">5</code>
+      <span class="cmd-desc">
+        To remove it later: <code>curl "https://api.telegram.org/botTOKEN/deleteWebhook"</code>
+      </span>
+    </div>
+  </div>
+
+  <h2 style="margin-bottom:8px;margin-top:16px">Supported message formats</h2>
+  <div class="cmd-table">
+    <div class="cmd-row">
+      <code class="cmd-code">Telegram Update JSON</code>
+      <span class="cmd-desc">Natively understood — sender, chat ID and text are extracted automatically.</span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code">{"text":"…","from":"…"}</code>
+      <span class="cmd-desc">Generic JSON object with a <code>text</code> field.</span>
+    </div>
+    <div class="cmd-row">
+      <code class="cmd-code">plain text</code>
+      <span class="cmd-desc">Raw UTF-8 body treated as the message text.</span>
+    </div>
+  </div>
+
+  <h2 style="margin-top:16px;margin-bottom:8px">Minimal config (<code>troop.toml</code>)</h2>
+  <pre>[[accounts]]
+name             = "tg-webhook"
+type             = "webhook"
+webhook_secret   = "replace-with-a-long-random-string"
+enabled          = true
+poll_interval_secs = 5</pre>
+</div>"#;
+
+    let add_form = r#"<div class="card" style="margin-top:8px">
+  <h2 style="margin-bottom:12px">Add webhook endpoint</h2>
+  <form method="post" action="/admin/integrations/webhook">
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" name="name" required placeholder="e.g. tg-webhook">
+    </div>
+    <div class="form-group">
+      <label>Webhook secret
+        <span style="color:var(--muted);font-weight:400">(used as URL path — leave blank to auto-generate)</span>
+      </label>
+      <input type="text" name="webhook_secret" placeholder="replace-with-a-long-random-string" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Poll interval (seconds)</label>
+      <input type="number" name="poll_interval_secs" value="5">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="enabled" value="true" checked style="width:auto">
+        Enabled
+      </label>
+    </div>
+    <button type="submit">Add endpoint</button>
+  </form>
+</div>"#;
+
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin">← Admin</a></div>
+{onboarding}
+<div class="section-header" style="margin-top:0">
+  <h2>Webhook endpoints ({count})</h2>
+</div>
+{account_cards}
+{add_form}"#,
+        onboarding = onboarding,
+        count = accounts.len(),
+        account_cards = account_cards,
+        add_form = add_form,
+    );
+
+    page("Webhook Integrations", "/admin", flash, &body, has_password)
+}
+
+/// Card for a single webhook account — shows the full webhook URL prominently.
+fn webhook_integration_card(a: &crate::config::AccountConfig, jobs: &[JobInfo]) -> String {
+    let job = jobs.iter().find(|j| j.name.ends_with(&a.name));
+    let connected = job.map(|j| j.connected).unwrap_or(false);
+    let last_error = job.and_then(|j| j.last_error.as_deref());
+    let dot = if connected { "dot-ok" } else { "dot-off" };
+    let status_text = if connected { "connected" } else { "offline" };
+    let enabled_badge = if a.enabled {
+        "<span class=\"badge badge-done\">enabled</span>"
+    } else {
+        "<span class=\"badge badge-off\">disabled</span>"
+    };
+    let secret = a.webhook_secret.as_deref().unwrap_or(&a.name);
+    let error_html = match last_error {
+        Some(err) => format!(
+            r#"<div class="last-error"><span class="error-label">Last error:</span> {}</div>"#,
+            html_escape(err)
+        ),
+        None => String::new(),
+    };
+    format!(
+        r#"<div class="card">
+  <div class="card-title"><span class="status-dot {dot}"></span>{name}</div>
+  <div class="card-meta">webhook &nbsp;·&nbsp; {status} &nbsp;·&nbsp; {enabled} &nbsp;·&nbsp; poll every {poll}s</div>
+  <div class="card-meta" style="margin-top:6px">
+    Webhook URL: <code>/webhook/{secret_display}</code>
+  </div>
+  {error_html}
+  <div class="actions">
+    <a href="/admin/integrations/webhook/{name_url}/edit" class="btn secondary">Edit</a>
+    <form class="inline" method="post" action="/admin/integrations/webhook/{name_url}/poll">
+      <button type="submit" class="secondary">Poll now</button>
+    </form>
+    <form class="inline" method="post" action="/admin/integrations/webhook/{name_url}/delete">
+      <button type="submit" class="danger">Remove</button>
+    </form>
+  </div>
+</div>"#,
+        dot = dot,
+        name = html_escape(&a.name),
+        name_url = urlencoding::encode(&a.name),
+        status = status_text,
+        enabled = enabled_badge,
+        poll = a.poll_interval_secs,
+        secret_display = html_escape(secret),
+        error_html = error_html,
+    )
+}
+
+// ── Edit webhook integration page ─────────────────────────────────────────────
+
+pub fn admin_edit_webhook_integration(
+    a: &crate::config::AccountConfig,
+    has_password: bool,
+    flash: Option<&str>,
+) -> String {
+    let poll_val = a.poll_interval_secs.to_string();
+    let enabled_checked = if a.enabled { " checked" } else { "" };
+    let name_url = urlencoding::encode(&a.name).to_string();
+    let secret_val = a.webhook_secret.as_deref().unwrap_or("");
+
+    let body = format!(
+        r#"<div style="margin-bottom:12px"><a href="/admin/integrations/webhook">← Webhook endpoints</a></div>
+<div class="card">
+  <h1>Edit: {name}</h1>
+  <form method="post" action="/admin/integrations/webhook/{name_url}/edit">
+    <div class="form-group">
+      <label>Webhook secret <span style="color:var(--muted);font-weight:400">(leave blank to keep existing)</span></label>
+      <input type="text" name="webhook_secret" value="{secret}" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Poll interval (seconds)</label>
+      <input type="number" name="poll_interval_secs" value="{poll}">
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+        <input type="checkbox" name="enabled" value="true"{enabled_checked} style="width:auto">
+        Enabled
+      </label>
+    </div>
+    <div style="display:flex;gap:7px">
+      <button type="submit">Save changes</button>
+      <a href="/admin/integrations/webhook" class="btn secondary">Cancel</a>
+    </div>
+  </form>
+</div>"#,
+        name = html_escape(&a.name),
+        name_url = name_url,
+        secret = html_escape(secret_val),
         poll = html_escape(&poll_val),
         enabled_checked = enabled_checked,
     );

@@ -46,6 +46,7 @@ pub enum AccountType {
     Imap,
     Pop3,
     Telegram,
+    Webhook,
 }
 
 impl std::fmt::Display for AccountType {
@@ -54,6 +55,7 @@ impl std::fmt::Display for AccountType {
             AccountType::Imap => write!(f, "imap"),
             AccountType::Pop3 => write!(f, "pop3"),
             AccountType::Telegram => write!(f, "telegram"),
+            AccountType::Webhook => write!(f, "webhook"),
         }
     }
 }
@@ -73,6 +75,10 @@ pub struct AccountConfig {
     pub tls: bool,
     // Telegram
     pub token: Option<String>,
+    // Webhook
+    /// Secret token used as both the URL path component and as an optional
+    /// `X-Telegram-Bot-Api-Secret-Token` header check.
+    pub webhook_secret: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default = "default_poll")]

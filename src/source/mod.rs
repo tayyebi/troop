@@ -1,6 +1,7 @@
 pub mod imap;
 pub mod pop3;
 pub mod telegram;
+pub mod webhook;
 
 use crate::message::Message;
 use anyhow::Result;

@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
     let job_manager = JobManager::new(storage.clone());
     job_manager.start_all(&config);
 
+    let webhook_queues = job_manager.webhook_queues.clone();
     let shared_config = Arc::new(RwLock::new(config.clone()));
 
     // Build shared app state
@@ -57,6 +58,7 @@ async fn main() -> Result<()> {
         storage,
         job_manager,
         session_token: Arc::new(RwLock::new(uuid::Uuid::new_v4().to_string())),
+        webhook_queues,
     };
 
     // Start HTTP server

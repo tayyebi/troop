@@ -1484,6 +1484,7 @@ dependencies = [
  "pulldown-cmark",
  "sanitize-filename",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "toml",
