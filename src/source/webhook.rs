@@ -94,7 +94,7 @@ pub fn message_from_payload(
             source: source_name.to_string(),
             from,
             subject: text.clone(),
-            body: text.clone(),
+            body: text,
             headers,
             raw_body: payload.to_vec(),
         });
@@ -110,11 +110,12 @@ pub fn message_from_payload(
                     .to_string();
                 let mut headers = HashMap::new();
                 headers.insert("x-webhook-secret".to_string(), secret.to_string());
+                let text = text.to_string();
                 return Some(Message {
                     source: source_name.to_string(),
                     from,
-                    subject: text.to_string(),
-                    body: text.to_string(),
+                    subject: text.clone(),
+                    body: text,
                     headers,
                     raw_body: payload.to_vec(),
                 });
@@ -133,7 +134,7 @@ pub fn message_from_payload(
         source: source_name.to_string(),
         from: "webhook".to_string(),
         subject: text.clone(),
-        body: text.clone(),
+        body: text,
         headers,
         raw_body: payload.to_vec(),
     })

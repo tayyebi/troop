@@ -1064,7 +1064,7 @@ pub fn admin_webhook_integrations(
     <div class="cmd-row">
       <code class="cmd-code" style="min-width:22px;text-align:center">3</code>
       <span class="cmd-desc">
-        Telegram responds with <code>{"ok":true}</code>.  Send a message to your bot —
+        Telegram responds with <code>{"ok":true}</code>. Send a message to your bot —
         troop will receive it and execute any <code>TROOP</code> command.
       </span>
     </div>
