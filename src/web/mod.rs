@@ -16,6 +16,7 @@ use std::{
 
 use crate::config::Config;
 use crate::jobs::JobManager;
+use crate::source::webhook::WebhookQueues;
 use crate::storage::Storage;
 
 // ── Shared application state ──────────────────────────────────────────────────
@@ -33,6 +34,11 @@ pub struct AppState {
     pub job_manager: Arc<JobManager>,
     /// Current valid session token (UUID v4).  Regenerated on password change.
     pub session_token: Arc<RwLock<String>>,
+    /// Shared webhook message queues, keyed by `webhook_secret`.
+    ///
+    /// The public `/webhook/:secret` endpoint pushes into these queues;
+    /// the `WebhookSource` poller drains them on each poll cycle.
+    pub webhook_queues: WebhookQueues,
 }
 
 // ── Cookie helpers ────────────────────────────────────────────────────────────
@@ -74,7 +80,7 @@ async fn auth_middleware(
 
 pub fn build_router(state: AppState) -> Router {
     // All application routes are protected by the auth middleware.
-    // Only /login and /logout remain public.
+    // Only /login, /logout, and the public webhook receiver remain public.
     let protected_routes = Router::new()
         // Root
         .route("/", get(handlers::root))
@@ -119,6 +125,23 @@ pub fn build_router(state: AppState) -> Router {
             "/admin/integrations/telegram/:name/poll",
             post(handlers::poll_now),
         )
+        // Integration management – webhook
+        .route(
+            "/admin/integrations/webhook",
+            get(handlers::webhook_integrations_page).post(handlers::add_webhook_integration),
+        )
+        .route(
+            "/admin/integrations/webhook/:name/delete",
+            post(handlers::delete_webhook_integration),
+        )
+        .route(
+            "/admin/integrations/webhook/:name/edit",
+            get(handlers::edit_webhook_integration_page).post(handlers::update_webhook_integration),
+        )
+        .route(
+            "/admin/integrations/webhook/:name/poll",
+            post(handlers::poll_now),
+        )
         .route(
             "/admin/filters",
             get(handlers::filter_list).post(handlers::add_filter),
@@ -138,6 +161,8 @@ pub fn build_router(state: AppState) -> Router {
         // Auth routes (always public)
         .route("/login", get(handlers::login_page).post(handlers::do_login))
         .route("/logout", post(handlers::do_logout))
+        // Webhook receiver – public so external services (e.g. Telegram) can POST here
+        .route("/webhook/:secret", post(handlers::webhook_receive))
         // All other routes require authentication
         .merge(protected_routes)
         // Catch-all

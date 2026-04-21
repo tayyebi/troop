@@ -7,6 +7,7 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::config::{AccountConfig, AccountType, FilterConfig, HeaderCheck};
+use crate::source::webhook::message_from_payload;
 use crate::storage::{Storage, Task};
 use super::{ui, AppState};
 
@@ -125,12 +126,16 @@ pub async fn admin_dashboard(
     let telegram_count = cfg.accounts.iter()
         .filter(|a| matches!(a.account_type, AccountType::Telegram))
         .count();
+    let webhook_count = cfg.accounts.iter()
+        .filter(|a| matches!(a.account_type, AccountType::Webhook))
+        .count();
     let job_count = state.job_manager.all_jobs().len();
     ok_html(ui::admin_dashboard(
         todo,
         done,
         email_count,
         telegram_count,
+        webhook_count,
         job_count,
         has_password,
         q.flash.as_deref(),
@@ -221,6 +226,7 @@ pub async fn add_email_integration(
         password: nonempty(form.password),
         tls,
         token: None,
+        webhook_secret: None,
         enabled,
         poll_interval_secs: poll,
         smtp_host: nonempty(form.smtp_host),
@@ -377,6 +383,7 @@ pub async fn add_telegram_integration(
         password: None,
         tls: false,
         token: nonempty(Some(form.token)),
+        webhook_secret: None,
         enabled,
         poll_interval_secs: poll,
         smtp_host: None,
@@ -467,7 +474,7 @@ pub async fn update_telegram_integration(
 // ── Admin – Manual poll trigger ───────────────────────────────────────────────
 
 /// Trigger an immediate poll for a connector by name.
-/// Works for both email and Telegram sources.
+/// Works for email, Telegram, and webhook sources.
 pub async fn poll_now(
     State(state): State<AppState>,
     Path(name): Path<String>,
@@ -480,6 +487,7 @@ pub async fn poll_now(
             .find(|a| a.name == name)
             .map(|a| match a.account_type {
                 AccountType::Telegram => "/admin/integrations/telegram",
+                AccountType::Webhook => "/admin/integrations/webhook",
                 _ => "/admin/integrations/email",
             })
             .unwrap_or("/admin/integrations/email")
@@ -568,6 +576,195 @@ pub async fn delete_filter(
     let cfg = state.config.read().unwrap().clone();
     state.job_manager.restart_all(&cfg);
     flash_redirect("/admin/filters", "Filter removed.")
+}
+
+// ── Public – Webhook receiver ─────────────────────────────────────────────────
+
+/// Receive an incoming webhook POST.
+///
+/// This route is intentionally **public** (no auth middleware) so that
+/// external services such as the Telegram Bot API can call it without a
+/// session cookie.
+///
+/// The `:secret` path segment doubles as a shared secret: only callers that
+/// know the secret URL can inject messages.  Requests whose secret does not
+/// match any configured webhook account receive a `404 Not Found`.
+pub async fn webhook_receive(
+    State(state): State<AppState>,
+    Path(secret): Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    // Look up the queue for this secret.
+    let queue = {
+        let queues = state.webhook_queues.read().unwrap();
+        queues.get(&secret).cloned()
+    };
+
+    let Some(queue) = queue else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // Find the account name that owns this secret (for the source label).
+    let source_name = {
+        let cfg = state.config.read().unwrap();
+        cfg.accounts
+            .iter()
+            .find(|a| {
+                matches!(a.account_type, AccountType::Webhook)
+                    && a.webhook_secret.as_deref().unwrap_or(&a.name) == secret
+            })
+            .map(|a| format!("webhook:{}", a.name))
+            .unwrap_or_else(|| format!("webhook:{}", secret))
+    };
+
+    match message_from_payload(&body, &source_name, &secret) {
+        Some(msg) => {
+            queue.lock().unwrap().push(msg);
+            StatusCode::OK.into_response()
+        }
+        None => {
+            // Accepted but nothing actionable (e.g. empty body, non-text update).
+            StatusCode::NO_CONTENT.into_response()
+        }
+    }
+}
+
+// ── Admin – Webhook integrations ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct AddWebhookForm {
+    pub name: String,
+    pub webhook_secret: Option<String>,
+    pub poll_interval_secs: Option<String>,
+    pub enabled: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct EditWebhookForm {
+    pub webhook_secret: Option<String>,
+    pub poll_interval_secs: Option<String>,
+    pub enabled: Option<String>,
+}
+
+pub async fn webhook_integrations_page(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    let cfg = state.config.read().unwrap();
+    let has_password = cfg.server.admin_password.is_some();
+    let jobs = state.job_manager.all_jobs();
+    let accounts: Vec<_> = cfg.accounts.iter()
+        .filter(|a| matches!(a.account_type, AccountType::Webhook))
+        .collect();
+    ok_html(ui::admin_webhook_integrations(&accounts, &jobs, has_password, q.flash.as_deref()))
+}
+
+pub async fn add_webhook_integration(
+    State(state): State<AppState>,
+    Form(form): Form<AddWebhookForm>,
+) -> Response {
+    let poll = form.poll_interval_secs.as_deref()
+        .and_then(|p| p.parse::<u64>().ok())
+        .unwrap_or(5);
+    let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(true);
+    // Use a generated UUID as default secret when none is provided.
+    let secret = nonempty(form.webhook_secret)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let account = AccountConfig {
+        name: form.name.trim().to_string(),
+        account_type: AccountType::Webhook,
+        host: None,
+        port: None,
+        username: None,
+        password: None,
+        tls: false,
+        token: None,
+        webhook_secret: Some(secret),
+        enabled,
+        poll_interval_secs: poll,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_username: None,
+        smtp_password: None,
+        smtp_tls: true,
+        reply_from: None,
+    };
+    {
+        let mut cfg = state.config.write().unwrap();
+        cfg.accounts.push(account);
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/integrations/webhook", &format!("ERR:save failed: {}", e));
+        }
+    }
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
+    flash_redirect("/admin/integrations/webhook", "Webhook endpoint added.")
+}
+
+pub async fn delete_webhook_integration(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    {
+        let mut cfg = state.config.write().unwrap();
+        let before = cfg.accounts.len();
+        cfg.accounts.retain(|a| a.name != name);
+        if cfg.accounts.len() == before {
+            return flash_redirect("/admin/integrations/webhook", &format!("ERR:Webhook '{}' not found.", name));
+        }
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/integrations/webhook", &format!("ERR:save failed: {}", e));
+        }
+    }
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
+    flash_redirect("/admin/integrations/webhook", &format!("'{}' removed.", name))
+}
+
+pub async fn edit_webhook_integration_page(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<FlashQuery>,
+) -> Response {
+    let cfg = state.config.read().unwrap();
+    let has_password = cfg.server.admin_password.is_some();
+    match cfg.accounts.iter().find(|a| a.name == name) {
+        Some(account) => ok_html(ui::admin_edit_webhook_integration(account, has_password, q.flash.as_deref())),
+        None => flash_redirect("/admin/integrations/webhook", &format!("ERR:Webhook '{}' not found.", name)),
+    }
+}
+
+pub async fn update_webhook_integration(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Form(form): Form<EditWebhookForm>,
+) -> Response {
+    let poll = form.poll_interval_secs.as_deref()
+        .and_then(|p| p.parse::<u64>().ok())
+        .unwrap_or(5);
+    let enabled = form.enabled.as_deref().map(|v| v == "true" || v == "on").unwrap_or(false);
+
+    {
+        let mut cfg = state.config.write().unwrap();
+        match cfg.accounts.iter_mut().find(|a| a.name == name) {
+            None => {
+                return flash_redirect("/admin/integrations/webhook", &format!("ERR:Webhook '{}' not found.", name));
+            }
+            Some(account) => {
+                if let Some(sec) = nonempty(form.webhook_secret) {
+                    account.webhook_secret = Some(sec);
+                }
+                account.enabled = enabled;
+                account.poll_interval_secs = poll;
+            }
+        }
+        if let Err(e) = cfg.save(&state.config_path) {
+            return flash_redirect("/admin/integrations/webhook", &format!("ERR:save failed: {}", e));
+        }
+    }
+    let cfg = state.config.read().unwrap().clone();
+    state.job_manager.restart_all(&cfg);
+    flash_redirect("/admin/integrations/webhook", &format!("'{}' updated.", name))
 }
 
 // ── Fallback ──────────────────────────────────────────────────────────────────

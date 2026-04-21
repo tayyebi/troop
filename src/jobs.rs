@@ -11,7 +11,11 @@ use crate::commands;
 use crate::config::{AccountConfig, AccountType, Config, FilterConfig};
 use crate::filter;
 use crate::smtp;
-use crate::source::{imap::ImapSource, pop3::Pop3Source, telegram::TelegramSource, MessageSource};
+use crate::source::{
+    imap::ImapSource, pop3::Pop3Source, telegram::TelegramSource,
+    webhook::{WebhookQueues, WebhookSource},
+    MessageSource,
+};
 use crate::storage::Storage;
 
 // ── Job phase ─────────────────────────────────────────────────────────────────
@@ -106,6 +110,12 @@ pub struct JobManager {
     handles: Mutex<HashMap<String, JoinHandle<()>>>,
     /// Shared task storage passed to every poller.
     storage: Arc<Storage>,
+    /// Shared queues for all webhook sources, keyed by `webhook_secret`.
+    ///
+    /// The HTTP handler pushes incoming payloads here; each `WebhookSource`
+    /// drains its queue on every poll.  Queues persist across config reloads
+    /// so in-flight messages are never lost.
+    pub webhook_queues: WebhookQueues,
 }
 
 impl JobManager {
@@ -116,6 +126,7 @@ impl JobManager {
             triggers: Arc::new(RwLock::new(HashMap::new())),
             handles: Mutex::new(HashMap::new()),
             storage,
+            webhook_queues: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -126,6 +137,9 @@ impl JobManager {
                 AccountType::Imap => Arc::new(ImapSource::new(account.clone())),
                 AccountType::Pop3 => Arc::new(Pop3Source::new(account.clone())),
                 AccountType::Telegram => Arc::new(TelegramSource::new(account.clone())),
+                AccountType::Webhook => {
+                    Arc::new(WebhookSource::new(account, &self.webhook_queues))
+                }
             };
             let name = source.name().to_string();
             info!(
@@ -133,6 +147,22 @@ impl JobManager {
                 name, account.poll_interval_secs
             );
             self.spawn_poller(source, account.clone(), config.filters.clone());
+        }
+        // Purge any webhook queues for accounts that are no longer present
+        // (deleted or renamed), so stale entries don't accumulate.
+        {
+            let active_secrets: std::collections::HashSet<String> = config
+                .accounts
+                .iter()
+                .filter(|a| matches!(a.account_type, AccountType::Webhook))
+                .map(|a| {
+                    a.webhook_secret
+                        .clone()
+                        .unwrap_or_else(|| a.name.clone())
+                })
+                .collect();
+            let mut queues = self.webhook_queues.write().unwrap();
+            queues.retain(|k, _| active_secrets.contains(k));
         }
         // Always run the done-task reply worker regardless of how many accounts exist.
         self.spawn_done_reply_worker(config.accounts.clone());
